@@ -5,7 +5,7 @@ import { Octokit } from "@octokit/rest";
 import chalk from "chalk";
 
 // Initialize Octokit (GitHub API client)
-const octokit = new Octokit({
+let octokit = new Octokit({
   auth: process.env.GITHUB_TOKEN, // Optional: for higher rate limits
 });
 
@@ -70,6 +70,7 @@ async function getCommitSha(owner, repo, tagOrCommit) {
       });
       return commitResponse.data.sha;
     } catch (commitError) {
+      console.error(commitError);
       throw new Error(`Could not find tag or commit: ${tagOrCommit}`);
     }
   }
@@ -99,22 +100,169 @@ async function getCommitsBetween(owner, repo, baseSha, headSha) {
 }
 
 /**
- * Format and display commit information
+ * Get files changed in a commit
+ * @param {string} owner - Repository owner
+ * @param {string} repo - Repository name
+ * @param {string} sha - Commit SHA
+ * @returns {Array} - Array of file paths
+ */
+async function getFilesChangedInCommit(owner, repo, sha) {
+  try {
+    const response = await octokit.rest.repos.getCommit({
+      owner,
+      repo,
+      ref: sha,
+    });
+
+    return response.data.files ? response.data.files.map((file) => file.filename) : [];
+  } catch (error) {
+    console.warn(`Warning: Could not get files for commit ${sha}: ${error.message}`);
+    return [];
+  }
+}
+
+/**
+ * Check if commit should be included based on target and exclude directories
+ * @param {Array} files - Array of file paths changed in the commit
+ * @param {string} targetDir - Target directory to include
+ * @param {string} excludeDir - Directory to exclude
+ * @returns {boolean} - Whether to include the commit
+ */
+function shouldIncludeCommit(files, targetDir, excludeDir) {
+  if (!targetDir && !excludeDir) {
+    return true; // No filtering
+  }
+
+  const hasTargetChanges = targetDir ? files.some((file) => file.startsWith(targetDir)) : false;
+  const hasExcludeChanges = excludeDir ? files.some((file) => file.startsWith(excludeDir)) : false;
+
+  if (targetDir) {
+    // If target directory is specified, include only if it has changes in target
+    return hasTargetChanges;
+  }
+
+  if (excludeDir) {
+    // If exclude directory is specified, exclude only if it has changes in exclude dir and no target dir
+    return !hasExcludeChanges;
+  }
+
+  return true;
+}
+
+/**
+ * Parse commit message for semver type and Jira ticket ID
+ * Format: "Semver type: [Jira ticket ID] Commit message"
+ * @param {string} message - Commit message
+ * @returns {object} - Object containing semverType and jiraTicketId
+ */
+function parseCommitMessage(message) {
+  // Regex to match: "type: [JIRA-123] message" or "type: message"
+  const semverTypes = [
+    "major",
+    "minor",
+    "patch",
+    "fix",
+    "maint",
+    "chore",
+    "feat",
+    "feature",
+    "docs",
+    "style",
+    "refactor",
+    "test",
+    "build",
+    "ci",
+    "perf",
+    "revert",
+  ];
+  const semverPattern = new RegExp(`^(${semverTypes.join("|")}):\\s*(?:\\[([A-Z]+-\\d+)\\]\\s*)?(.*)`, "i");
+
+  const match = message.match(semverPattern);
+
+  if (match) {
+    return {
+      semverType: match[1].toLowerCase(),
+      jiraTicketId: match[2] || null,
+      cleanMessage: match[3].trim(),
+    };
+  }
+
+  // Also check for Jira ticket anywhere in the message
+  const jiraMatch = message.match(/\[([A-Z]+-\d+)\]/);
+
+  return {
+    semverType: null,
+    jiraTicketId: jiraMatch ? jiraMatch[1] : null,
+    cleanMessage: message,
+  };
+}
+
+/**
+ * Filter commits based on directory criteria
  * @param {Array} commits - Array of commit objects
+ * @param {string} owner - Repository owner
+ * @param {string} repo - Repository name
+ * @param {string} targetDir - Target directory to include
+ * @param {string} excludeDir - Directory to exclude
+ * @returns {Array} - Filtered array of commits
+ */
+async function filterCommitsByDirectory(commits, owner, repo, targetDir, excludeDir) {
+  if (!targetDir && !excludeDir) {
+    return commits; // No filtering needed
+  }
+
+  const filteredCommits = [];
+
+  for (const commit of commits) {
+    const files = await getFilesChangedInCommit(owner, repo, commit.sha);
+
+    if (shouldIncludeCommit(files, targetDir, excludeDir)) {
+      filteredCommits.push(commit);
+    }
+  }
+
+  return filteredCommits;
+}
+
+/**
+ * Process commits and extract relevant information
+ * @param {Array} commits - Array of commit objects
+ * @returns {Array} - Array of processed commit objects
+ */
+function processCommits(commits) {
+  return commits.map((commit) => {
+    const { semverType, jiraTicketId, cleanMessage } = parseCommitMessage(commit.commit.message);
+
+    return {
+      hash: commit.sha,
+      shortHash: commit.sha.substring(0, 7),
+      author: commit.commit.author.name,
+      date: commit.commit.author.date,
+      message: commit.commit.message.split("\n")[0], // First line only
+      cleanMessage,
+      semverType,
+      jiraTicketId,
+    };
+  });
+}
+
+/**
+ * Display commits in human-readable format
+ * @param {Array} processedCommits - Array of processed commit objects
  * @param {string} fromRef - Starting reference (tag or commit)
  * @param {string} toRef - Ending reference (tag or commit)
  */
-function displayCommits(commits, fromRef, toRef) {
+function displayCommitsHuman(processedCommits, fromRef, toRef) {
   console.log(chalk.blue.bold(`\n📋 Commits between ${fromRef} and ${toRef}:`));
   console.log(chalk.gray("─".repeat(80)));
 
-  if (commits.length === 0) {
+  if (processedCommits.length === 0) {
     console.log(chalk.yellow("No commits found between the specified references."));
     return;
   }
 
-  commits.forEach((commit, index) => {
-    const date = new Date(commit.commit.author.date).toLocaleDateString("en-US", {
+  processedCommits.forEach((commit, index) => {
+    const date = new Date(commit.date).toLocaleDateString("en-US", {
       year: "numeric",
       month: "short",
       day: "numeric",
@@ -122,16 +270,73 @@ function displayCommits(commits, fromRef, toRef) {
       minute: "2-digit",
     });
 
-    const author = commit.commit.author.name;
-    const message = commit.commit.message.split("\n")[0]; // Get first line only
-    const sha = commit.sha.substring(0, 7);
+    let messageDisplay = `${chalk.green(index + 1 + ".")} ${chalk.cyan(commit.shortHash)} ${chalk.white(commit.message)}`;
 
-    console.log(`${chalk.green(index + 1 + ".")} ${chalk.cyan(sha)} ${chalk.white(message)}`);
-    console.log(`   ${chalk.gray("By:")} ${chalk.yellow(author)} ${chalk.gray("on")} ${chalk.magenta(date)}`);
+    // Add semver type if present
+    if (commit.semverType) {
+      const semverColor = getSemverColor(commit.semverType);
+      messageDisplay += ` ${chalk.bgBlack(semverColor(`[${commit.semverType.toUpperCase()}]`))}`;
+    }
+
+    // Add Jira ticket if present
+    if (commit.jiraTicketId) {
+      messageDisplay += ` ${chalk.bgBlue.white(`[${commit.jiraTicketId}]`)}`;
+    }
+
+    console.log(messageDisplay);
+    console.log(`   ${chalk.gray("By:")} ${chalk.yellow(commit.author)} ${chalk.gray("on")} ${chalk.magenta(date)}`);
     console.log("");
   });
 
-  console.log(chalk.blue.bold(`Total commits: ${commits.length}`));
+  console.log(chalk.blue.bold(`Total commits: ${processedCommits.length}`));
+}
+
+/**
+ * Get color for semver type
+ * @param {string} semverType - The semver type
+ * @returns {Function} - Chalk color function
+ */
+function getSemverColor(semverType) {
+  const colors = {
+    major: chalk.red,
+    minor: chalk.yellow,
+    patch: chalk.green,
+    fix: chalk.green,
+    feat: chalk.blue,
+    feature: chalk.blue,
+    chore: chalk.gray,
+    maint: chalk.gray,
+    docs: chalk.cyan,
+    style: chalk.magenta,
+    refactor: chalk.yellow,
+    test: chalk.green,
+    build: chalk.orange,
+    ci: chalk.blue,
+    perf: chalk.yellow,
+    revert: chalk.red,
+  };
+
+  return colors[semverType] || chalk.white;
+}
+
+/**
+ * Output commits in JSON format
+ * @param {Array} processedCommits - Array of processed commit objects
+ */
+function outputCommitsJson(processedCommits) {
+  const output = {
+    commits: processedCommits.map((commit) => ({
+      hash: commit.hash,
+      author: commit.author,
+      date: commit.date,
+      message: commit.cleanMessage || commit.message,
+      semverType: commit.semverType,
+      jiraTicketId: commit.jiraTicketId,
+    })),
+    totalCommits: processedCommits.length,
+  };
+
+  console.log(JSON.stringify(output, null, 2));
 }
 
 // CLI Program Setup
@@ -143,40 +348,79 @@ program
   .argument("<from>", "Starting tag or commit hash")
   .argument("<to>", "Ending tag or commit hash")
   .option("-t, --token <token>", "GitHub personal access token (or set GITHUB_TOKEN env var)")
+  .option("-f, --format <format>", "Output format: human or json", "human")
+  .option("--target-dir <directory>", "Limit commits to those that changed files in this directory")
+  .option("--exclude-dir <directory>", "Exclude commits that only changed files in this directory")
   .action(async (repoUrl, from, to, options) => {
     try {
       // Set GitHub token if provided via option
       if (options.token) {
-        octokit.auth = options.token;
+        octokit = new Octokit({
+          auth: options.token,
+        });
       }
 
-      console.log(chalk.blue("🔍 Analyzing repository..."));
+      // Validate output format
+      if (!["human", "json"].includes(options.format)) {
+        throw new Error('Invalid output format. Use "human" or "json".');
+      }
+
+      if (options.format === "human") {
+        console.log(chalk.blue("🔍 Analyzing repository..."));
+      }
 
       // Parse GitHub URL
       const { owner, repo } = parseGitHubUrl(repoUrl);
-      console.log(chalk.gray(`Repository: ${owner}/${repo}`));
+      if (options.format === "human") {
+        console.log(chalk.gray(`Repository: ${owner}/${repo}`));
+      }
 
       // Get commit SHAs for the references
-      console.log(chalk.blue("📍 Resolving references..."));
+      if (options.format === "human") {
+        console.log(chalk.blue("📍 Resolving references..."));
+      }
       const fromSha = await getCommitSha(owner, repo, from);
       const toSha = await getCommitSha(owner, repo, to);
 
-      console.log(chalk.gray(`From: ${from} (${fromSha.substring(0, 7)})`));
-      console.log(chalk.gray(`To: ${to} (${toSha.substring(0, 7)})`));
+      if (options.format === "human") {
+        console.log(chalk.gray(`From: ${from} (${fromSha.substring(0, 7)})`));
+        console.log(chalk.gray(`To: ${to} (${toSha.substring(0, 7)})`));
+      }
 
       // Get commits between the references
-      console.log(chalk.blue("📊 Fetching commits..."));
-      const commits = await getCommitsBetween(owner, repo, fromSha, toSha);
+      if (options.format === "human") {
+        console.log(chalk.blue("📊 Fetching commits..."));
+      }
+      let commits = await getCommitsBetween(owner, repo, fromSha, toSha);
 
-      // Display the results
-      displayCommits(commits, from, to);
+      // Filter commits by directory if specified
+      if (options.targetDir || options.excludeDir) {
+        if (options.format === "human") {
+          console.log(chalk.blue("🔍 Filtering commits by directory..."));
+        }
+        commits = await filterCommitsByDirectory(commits, owner, repo, options.targetDir, options.excludeDir);
+      }
+
+      // Process commits to extract semver and Jira information
+      const processedCommits = processCommits(commits);
+
+      // Output results
+      if (options.format === "json") {
+        outputCommitsJson(processedCommits);
+      } else {
+        displayCommitsHuman(processedCommits, from, to);
+      }
     } catch (error) {
-      console.error(chalk.red("❌ Error:"), error.message);
+      if (options.format === "json") {
+        console.error(JSON.stringify({ error: error.message }, null, 2));
+      } else {
+        console.error(chalk.red("❌ Error:"), error.message);
 
-      if (error.message.includes("API rate limit exceeded")) {
-        console.log(chalk.yellow("\n💡 Tip: Set a GitHub personal access token to increase rate limits:"));
-        console.log(chalk.gray("   export GITHUB_TOKEN=your_token_here"));
-        console.log(chalk.gray("   or use the --token option"));
+        if (error.message.includes("API rate limit exceeded")) {
+          console.log(chalk.yellow("\n💡 Tip: Set a GitHub personal access token to increase rate limits:"));
+          console.log(chalk.gray("   export GITHUB_TOKEN=your_token_here"));
+          console.log(chalk.gray("   or use the --token option"));
+        }
       }
 
       process.exit(1);

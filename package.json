@@ -7,9 +7,17 @@
   "scripts": {
     "start": "node index.js",
     "dev": "node --watch index.js",
-    "cli": "node index.js"
+    "cli": "node index.js",
+    "test": "node index.js --help"
   },
-  "keywords": ["git", "github", "cli", "commits", "version", "diff"],
+  "keywords": [
+    "git",
+    "github",
+    "cli",
+    "commits",
+    "version",
+    "diff"
+  ],
   "author": "",
   "license": "MIT",
   "dependencies": {
