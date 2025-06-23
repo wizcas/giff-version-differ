@@ -2,11 +2,20 @@
 
 import { program } from "commander";
 import { Octokit } from "@octokit/rest";
+import { graphql } from "@octokit/graphql";
 import chalk from "chalk";
+
+const REQUEST_SIZE = 50;
 
 // Initialize Octokit (GitHub API client)
 let octokit = new Octokit({
   auth: process.env.GITHUB_TOKEN, // Optional: for higher rate limits
+});
+
+let graphqlWithAuth = graphql.defaults({
+  headers: {
+    authorization: process.env.GITHUB_TOKEN ? `token ${process.env.GITHUB_TOKEN}` : undefined,
+  },
 });
 
 /**
@@ -77,25 +86,139 @@ async function getCommitSha(owner, repo, tagOrCommit) {
 }
 
 /**
- * Get commits between two commit SHAs
+ * Get commits between two commit SHAs with file information
  * @param {string} owner - Repository owner
  * @param {string} repo - Repository name
  * @param {string} baseSha - Base commit SHA (older)
  * @param {string} headSha - Head commit SHA (newer)
- * @returns {Array} - Array of commit objects
+ * @returns {Object} - Object containing commits and files data
  */
-async function getCommitsBetween(owner, repo, baseSha, headSha) {
+/**
+ * Get commits between two SHAs using optimized GraphQL
+ * @param {string} owner - Repository owner
+ * @param {string} repo - Repository name
+ * @param {string} baseSha - Base commit SHA (older)
+ * @param {string} headSha - Head commit SHA (newer)
+ * @returns {Array} - Array of commit objects with file information
+ */
+async function getCommitsBetweenGraphQL(owner, repo, baseSha, headSha) {
   try {
-    const response = await octokit.rest.repos.compareCommits({
-      owner,
-      repo,
-      base: baseSha,
-      head: headSha,
-    });
+    const query = `
+      query($owner: String!, $repo: String!, $headSha: String!) {
+        repository(owner: $owner, name: $repo) {
+          object(expression: $headSha) {
+            ... on Commit {
+              history(first: ${REQUEST_SIZE}) {
+                nodes {
+                  oid
+                  message
+                  author {
+                    name
+                    date
+                  }
+                  changedFilesIfAvailable
+                  associatedPullRequests(first: 1) {
+                    nodes {
+                      files(first: 100) {
+                        nodes {
+                          path
+                        }
+                      }
+                    }
+                  }
+                }
+                pageInfo {
+                  hasNextPage
+                  endCursor
+                }
+              }
+            }
+          }
+        }
+      }
+    `;
 
-    return response.data.commits;
+    let allCommits = [];
+    let hasNextPage = true;
+    let cursor = null;
+    let foundBase = false;
+
+    while (hasNextPage && !foundBase && allCommits.length < 1000) {
+      const paginatedQuery = cursor
+        ? `
+        query($owner: String!, $repo: String!, $cursor: String!) {
+          repository(owner: $owner, name: $repo) {
+            object(expression: "HEAD") {
+              ... on Commit {
+                history(first: ${REQUEST_SIZE}, after: $cursor) {
+                  nodes {
+                    oid
+                    message
+                    author {
+                      name
+                      date
+                    }
+                    changedFilesIfAvailable
+                    associatedPullRequests(first: 1) {
+                      nodes {
+                        files(first: 100) {
+                          nodes {
+                            path
+                          }
+                        }
+                      }
+                    }
+                  }
+                  pageInfo {
+                    hasNextPage
+                    endCursor
+                  }
+                }
+              }
+            }
+          }
+        }
+      `
+        : query;
+
+      const variables = cursor ? { owner, repo, cursor } : { owner, repo, headSha };
+
+      const result = await graphqlWithAuth(paginatedQuery, variables);
+      const commits = result.repository.object.history.nodes;
+
+      for (const commit of commits) {
+        if (commit.oid === baseSha) {
+          foundBase = true;
+          break;
+        }
+
+        // Extract file paths from PR if available
+        let files = [];
+        if (commit.associatedPullRequests.nodes.length > 0 && commit.associatedPullRequests.nodes[0].files.nodes.length > 0) {
+          files = commit.associatedPullRequests.nodes[0].files.nodes.map((f) => f.path);
+        }
+
+        allCommits.push({
+          sha: commit.oid,
+          commit: {
+            message: commit.message,
+            author: {
+              name: commit.author.name,
+              date: commit.author.date,
+            },
+          },
+          files: files,
+          changedFilesCount: commit.changedFilesIfAvailable || files.length,
+        });
+      }
+
+      hasNextPage = result.repository.object.history.pageInfo.hasNextPage;
+      cursor = result.repository.object.history.pageInfo.endCursor;
+    }
+
+    return allCommits;
   } catch (error) {
-    throw new Error(`Error comparing commits: ${error.message}`);
+    throw new Error(`GraphQL query failed: ${error.message}`);
   }
 }
 
@@ -198,8 +321,18 @@ function parseCommitMessage(message) {
 }
 
 /**
- * Filter commits based on directory criteria
+ * Filter commits based on directory criteria (optimized version)
  * @param {Array} commits - Array of commit objects
+ * @param {Array} allFiles - All files changed in the comparison (from compare API)
+ * @param {string} owner - Repository owner
+ * @param {string} repo - Repository name
+ * @param {string} targetDir - Target directory to include
+ * @param {string} excludeDir - Directory to exclude
+ * @returns {Array} - Filtered array of commits
+ */
+/**
+ * Filter commits based on directory criteria using GraphQL data
+ * @param {Array} commits - Array of commit objects with files property
  * @param {string} owner - Repository owner
  * @param {string} repo - Repository name
  * @param {string} targetDir - Target directory to include
@@ -214,7 +347,24 @@ async function filterCommitsByDirectory(commits, owner, repo, targetDir, exclude
   const filteredCommits = [];
 
   for (const commit of commits) {
-    const files = await getFilesChangedInCommit(owner, repo, commit.sha);
+    let files = commit.files || [];
+
+    // If no files from GraphQL or REST initial call, fetch them individually
+    if (files.length === 0) {
+      try {
+        files = await getFilesChangedInCommit(owner, repo, commit.sha);
+        // Cache the files in the commit object for potential reuse
+        commit.files = files;
+      } catch (error) {
+        // If we can't get file info, include the commit to be safe (unless we have a strict target dir)
+        if (targetDir) {
+          // Skip commits we can't verify for target directory
+          console.warn(`Warning: Skipping commit ${commit.sha.substring(0, 7)} - could not get file info for target directory filtering`);
+          continue;
+        }
+        files = [];
+      }
+    }
 
     if (shouldIncludeCommit(files, targetDir, excludeDir)) {
       filteredCommits.push(commit);
@@ -320,10 +470,30 @@ function getSemverColor(semverType) {
 }
 
 /**
+ * Format elapsed time in a human-readable way
+ * @param {number} milliseconds - Elapsed time in milliseconds
+ * @returns {string} - Formatted time string
+ */
+function formatElapsedTime(milliseconds) {
+  const seconds = milliseconds / 1000;
+
+  if (seconds < 1) {
+    return `${milliseconds}ms`;
+  } else if (seconds < 60) {
+    return `${seconds.toFixed(2)}s`;
+  } else {
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = (seconds % 60).toFixed(2);
+    return `${minutes}m ${remainingSeconds}s`;
+  }
+}
+
+/**
  * Output commits in JSON format
  * @param {Array} processedCommits - Array of processed commit objects
+ * @param {number} elapsedTime - Elapsed time in milliseconds (optional)
  */
-function outputCommitsJson(processedCommits) {
+function outputCommitsJson(processedCommits, elapsedTime = null) {
   const output = {
     commits: processedCommits.map((commit) => ({
       hash: commit.hash,
@@ -335,6 +505,10 @@ function outputCommitsJson(processedCommits) {
     })),
     totalCommits: processedCommits.length,
   };
+
+  if (elapsedTime !== null) {
+    output.elapsedTime = formatElapsedTime(elapsedTime);
+  }
 
   console.log(JSON.stringify(output, null, 2));
 }
@@ -352,11 +526,18 @@ program
   .option("--target-dir <directory>", "Limit commits to those that changed files in this directory")
   .option("--exclude-dir <directory>", "Exclude commits that only changed files in this directory")
   .action(async (repoUrl, from, to, options) => {
+    const startTime = Date.now(); // Start timing
+
     try {
       // Set GitHub token if provided via option
       if (options.token) {
         octokit = new Octokit({
           auth: options.token,
+        });
+        graphqlWithAuth = graphql.defaults({
+          headers: {
+            authorization: `token ${options.token}`,
+          },
         });
       }
 
@@ -387,11 +568,43 @@ program
         console.log(chalk.gray(`To: ${to} (${toSha.substring(0, 7)})`));
       }
 
-      // Get commits between the references
+      // Get commits between the references using GraphQL (with REST fallback)
       if (options.format === "human") {
         console.log(chalk.blue("📊 Fetching commits..."));
       }
-      let commits = await getCommitsBetween(owner, repo, fromSha, toSha);
+
+      let commits;
+      try {
+        commits = await getCommitsBetweenGraphQL(owner, repo, fromSha, toSha);
+        if (options.format === "human") {
+          console.log(chalk.green("✅ Used GraphQL API"));
+        }
+      } catch (error) {
+        if (options.format === "human") {
+          console.log(chalk.yellow("⚠️  GraphQL failed, falling back to REST API..."));
+        }
+        // Fallback to REST API with file information
+        const response = await octokit.rest.repos.compareCommits({
+          owner,
+          repo,
+          base: fromSha,
+          head: toSha,
+        });
+
+        // Transform REST API response to match GraphQL structure with file info
+        commits = response.data.commits.map((commit) => ({
+          sha: commit.sha,
+          commit: {
+            message: commit.message,
+            author: {
+              name: commit.commit.author.name,
+              date: commit.commit.author.date,
+            },
+          },
+          files: [], // Will be populated during filtering if needed
+          changedFilesCount: 0,
+        }));
+      }
 
       // Filter commits by directory if specified
       if (options.targetDir || options.excludeDir) {
@@ -405,14 +618,30 @@ program
       const processedCommits = processCommits(commits);
 
       // Output results
+      const endTime = Date.now();
+      const elapsedTime = endTime - startTime;
+
       if (options.format === "json") {
-        outputCommitsJson(processedCommits);
+        outputCommitsJson(processedCommits, elapsedTime);
       } else {
         displayCommitsHuman(processedCommits, from, to);
+        console.log(chalk.gray(`\n⏱️  Total elapsed time: ${formatElapsedTime(elapsedTime)}`));
       }
     } catch (error) {
+      const endTime = Date.now();
+      const elapsedTime = endTime - startTime;
+
       if (options.format === "json") {
-        console.error(JSON.stringify({ error: error.message }, null, 2));
+        console.error(
+          JSON.stringify(
+            {
+              error: error.message,
+              elapsedTime: formatElapsedTime(elapsedTime),
+            },
+            null,
+            2
+          )
+        );
       } else {
         console.error(chalk.red("❌ Error:"), error.message);
 
@@ -421,6 +650,8 @@ program
           console.log(chalk.gray("   export GITHUB_TOKEN=your_token_here"));
           console.log(chalk.gray("   or use the --token option"));
         }
+
+        console.log(chalk.gray(`\n⏱️  Total elapsed time: ${formatElapsedTime(elapsedTime)}`));
       }
 
       process.exit(1);
