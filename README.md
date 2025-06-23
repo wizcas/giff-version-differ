@@ -1,9 +1,10 @@
 # Git Version Differ
 
-A Node.js CLI tool that fetches commit information between two Git tags or commit hashes from a GitHub repository with advanced filtering and formatting capabilities.
+A Node.js tool that fetches commit information between two Git tags or commit hashes from a GitHub repository. Available as both a CLI tool and a Vercel serverless function.
 
 ## Features
 
+- 🖥️ **Dual Mode Operation** - CLI tool and Vercel serverless function
 - ✅ **Optimized GitHub API calls** - Uses GraphQL by default with automatic REST API fallback
 - ✅ **Execution timing** - Shows total elapsed time at the end of each execution
 - ✅ Accepts GitHub repository URLs in various formats
@@ -11,10 +12,11 @@ A Node.js CLI tool that fetches commit information between two Git tags or commi
 - ✅ Displays commit titles, dates, and authors
 - ✅ Parses semver types from commit messages (`major`, `minor`, `patch`, `fix`, `feat`, etc.)
 - ✅ Extracts Jira ticket IDs from commit messages
-- ✅ Supports JSON and human-readable output formats
+- ✅ Supports JSON and human-readable output formats (CLI) / JSON output (API)
 - ✅ Directory-based filtering (include/exclude commits by changed files)
-- ✅ Beautiful colored output in human format
+- ✅ Beautiful colored output in human format (CLI)
 - ✅ Supports GitHub personal access tokens for higher rate limits
+- ✅ CORS-enabled API endpoint for web applications
 - ✅ Node.js 22+ compatible
 
 ## Installation
@@ -28,6 +30,8 @@ A Node.js CLI tool that fetches commit information between two Git tags or commi
 
 ## Usage
 
+### CLI Mode
+
 ### Basic Usage
 
 ```bash
@@ -40,6 +44,7 @@ pnpm start <github-repo-url> <from-tag-or-commit> <to-tag-or-commit> [options]
 - `-f, --format <format>` - Output format: `human` (default) or `json`
 - `--target-dir <directory>` - Limit commits to those that changed files in this directory
 - `--exclude-dir <directory>` - Exclude commits that only changed files in this directory
+- `--rest-only` - Force use of REST API only (bypass GraphQL)
 
 ### Examples
 
@@ -61,6 +66,9 @@ pnpm start https://github.com/facebook/react abc1234 def5678
 
 # With GitHub token for higher rate limits
 pnpm start https://github.com/facebook/react v18.0.0 v18.2.0 --token your_github_token
+
+# Force REST API usage (for testing or troubleshooting)
+pnpm start https://github.com/facebook/react v18.0.0 v18.2.0 --rest-only
 ```
 
 ### Supported GitHub URL Formats
@@ -226,3 +234,94 @@ The tool provides helpful error messages for:
 ## License
 
 MIT
+
+## Vercel API Mode
+
+The tool can also be deployed as a serverless function on Vercel, providing an HTTP API endpoint.
+
+#### API Endpoint
+
+```
+GET /git-diff?repo=<repo-url>&from=<from-ref>&to=<to-ref>&[options]
+```
+
+#### Query Parameters
+
+- `repo` - **Required** - GitHub repository URL
+- `from` - **Required** - Starting tag or commit hash  
+- `to` - **Required** - Ending tag or commit hash
+- `token` - Optional - GitHub personal access token
+- `targetDir` - Optional - Limit commits to those that changed files in this directory
+- `excludeDir` - Optional - Exclude commits that only changed files in this directory
+- `restOnly` - Optional - Set to `true` or `1` to force REST API usage
+
+#### API Examples
+
+```bash
+# Basic usage
+curl "https://your-vercel-app.vercel.app/git-diff?repo=https://github.com/facebook/react&from=v18.0.0&to=v18.2.0"
+
+# With directory filtering
+curl "https://your-vercel-app.vercel.app/git-diff?repo=https://github.com/facebook/react&from=v18.0.0&to=v18.2.0&targetDir=packages/"
+
+# Force REST API usage
+curl "https://your-vercel-app.vercel.app/git-diff?repo=https://github.com/facebook/react&from=v18.0.0&to=v18.2.0&restOnly=true"
+
+# With authentication token (recommended for higher rate limits)
+curl "https://your-vercel-app.vercel.app/git-diff?repo=https://github.com/facebook/react&from=v18.0.0&to=v18.2.0&token=your_github_token"
+```
+
+#### API Response Format
+
+```json
+{
+  "success": true,
+  "commits": [
+    {
+      "hash": "abc123...",
+      "author": "John Doe",
+      "date": "2023-10-15T10:30:00Z",
+      "message": "Add new feature",
+      "semverType": "feat",
+      "jiraTicketId": "PROJ-123"
+    }
+  ],
+  "totalCommits": 42,
+  "elapsedTime": "1.23s",
+  "apiUsed": "graphql",
+  "repository": {
+    "owner": "facebook",
+    "repo": "react"
+  },
+  "fromRef": "v18.0.0",
+  "toRef": "v18.2.0",
+  "fromSha": "def456",
+  "toSha": "ghi789"
+}
+```
+
+#### Error Response Format
+
+```json
+{
+  "success": false,
+  "error": "Error message description",
+  "elapsedTime": "0.5s"
+}
+```
+
+#### Deploy to Vercel
+
+1. Install Vercel CLI: `npm i -g vercel`
+2. Run `pnpm vercel-deploy` or `vercel --prod`
+3. Set environment variable: `GITHUB_TOKEN=your_token_here`
+
+#### Local Development
+
+```bash
+# Start local development server
+pnpm vercel-dev
+
+# Test the API locally
+curl "http://localhost:3000/git-diff?repo=https://github.com/owner/repo&from=tag1&to=tag2"
+```

@@ -1,14 +1,19 @@
 {
   "name": "git-version-differ",
   "version": "1.0.0",
-  "description": "A CLI tool to get commit information between two Git tags or commit hashes from a GitHub repository",
+  "description": "A CLI tool and Vercel function to get commit information between two Git tags or commit hashes from a GitHub repository",
   "main": "index.js",
   "type": "module",
   "scripts": {
     "start": "node index.js",
     "dev": "node --watch index.js",
     "cli": "node index.js",
-    "test": "node index.js --help"
+    "test": "node test-all.js",
+    "test-core": "node test-core.js",
+    "local-server": "node local-server.js",
+    "api-dev": "node local-server.js",
+    "vercel-dev": "vercel dev",
+    "vercel-deploy": "vercel --prod"
   },
   "keywords": [
     "git",
@@ -16,7 +21,10 @@
     "cli",
     "commits",
     "version",
-    "diff"
+    "diff",
+    "vercel",
+    "serverless",
+    "api"
   ],
   "author": "",
   "license": "MIT",
@@ -29,5 +37,8 @@
   "engines": {
     "node": ">=20.0.0"
   },
-  "packageManager": "pnpm@10.6.4"
+  "packageManager": "pnpm@10.6.4",
+  "devDependencies": {
+    "@vercel/node": "^5.3.0"
+  }
 }

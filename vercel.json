@@ -1,0 +1,13 @@
+{
+  "functions": {
+    "api/git-diff.js": {
+      "runtime": "nodejs20.x"
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/git-diff",
+      "destination": "/api/git-diff"
+    }
+  ]
+}

@@ -6,6 +6,10 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+# Vercel
+.vercel
+.env*.local
+
 # Runtime data
 pids
 *.pid
