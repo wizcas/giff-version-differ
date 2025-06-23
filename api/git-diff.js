@@ -14,9 +14,9 @@ export default async function handler(req, res) {
   if (req.method === "OPTIONS") {
     return res.status(200).end();
   }
-
   // Only allow GET method
   if (req.method !== "GET") {
+    console.error(`[API Error] Method not allowed: ${req.method} ${req.url}`);
     return res.status(405).json({
       success: false,
       error: "Method not allowed. Use GET method.",
@@ -24,10 +24,9 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { repo, from, to, token, targetDir, excludeDir, restOnly } = req.query;
-
-    // Validate required parameters
+    const { repo, from, to, token, targetDir, excludeDir, restOnly } = req.query; // Validate required parameters
     if (!repo) {
+      console.error(`[API Error] Missing repo parameter: ${req.url}`);
       return res.status(400).json({
         success: false,
         error: "Missing required parameter: repo (GitHub repository URL)",
@@ -35,6 +34,7 @@ export default async function handler(req, res) {
     }
 
     if (!from) {
+      console.error(`[API Error] Missing from parameter: ${req.url}`);
       return res.status(400).json({
         success: false,
         error: "Missing required parameter: from (starting tag or commit hash)",
@@ -42,6 +42,7 @@ export default async function handler(req, res) {
     }
 
     if (!to) {
+      console.error(`[API Error] Missing to parameter: ${req.url}`);
       return res.status(400).json({
         success: false,
         error: "Missing required parameter: to (ending tag or commit hash)",
@@ -61,13 +62,15 @@ export default async function handler(req, res) {
 
     // Get commits
     const result = await getCommitsBetween(options);
-
     if (result.success) {
+      console.log(`[API Success] ${repo} ${from}..${to} - ${result.totalCommits} commits (${result.elapsedTime})`);
       return res.status(200).json(result);
     } else {
+      console.error(`[API Error] ${repo} ${from}..${to} - ${result.error}`);
       return res.status(500).json(result);
     }
   } catch (error) {
+    console.error(`[API Exception] ${req.url} - ${error.message}`, error.stack);
     return res.status(500).json({
       success: false,
       error: error.message,

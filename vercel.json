@@ -1,7 +1,9 @@
 {
+  "version": 2,
   "functions": {
     "api/git-diff.js": {
-      "runtime": "nodejs20.x"
+      "runtime": "nodejs20.x",
+      "maxDuration": 30
     }
   },
   "rewrites": [
@@ -9,5 +11,8 @@
       "source": "/git-diff",
       "destination": "/api/git-diff"
     }
-  ]
+  ],
+  "env": {
+    "NODE_ENV": "production"
+  }
 }
