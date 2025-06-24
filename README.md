@@ -1,11 +1,19 @@
 # Git Version Differ
 
-A Node.js tool that fetches commit information between two Git tags or commit hashes from a GitHub repository. Available as both a CLI tool and a Vercel serverless function.
+# Git Version Differ
+
+A **Next.js API** application to get commit information between two Git tags or commit hashes from GitHub repositories. Features a web interface, API endpoint, and CLI tool.
 
 ## Features
 
-- 🖥️ **Dual Mode Operation** - CLI tool and Vercel serverless function
-- ✅ **Optimized GitHub API calls** - Uses GraphQL by default with automatic REST API fallback
+- � **Next.js App Router API** at `/api/git-diff`
+- 🖥️ **Web Interface** for easy testing and usage  
+- 🛠️ **CLI Tool** for command-line usage
+- 📊 **GraphQL + REST API** support with automatic fallback
+- 🎯 **Directory Filtering** (target/exclude specific directories)
+- 🏷️ **Semver Detection** in commit messages
+- 🎫 **Jira Ticket ID** extraction
+- ⚡ **Vercel Deployment** ready
 - ✅ **Execution timing** - Shows total elapsed time at the end of each execution
 - ✅ Accepts GitHub repository URLs in various formats
 - ✅ Works with both Git tags and commit hashes
@@ -13,11 +21,10 @@ A Node.js tool that fetches commit information between two Git tags or commit ha
 - ✅ Parses semver types from commit messages (`major`, `minor`, `patch`, `fix`, `feat`, etc.)
 - ✅ Extracts Jira ticket IDs from commit messages
 - ✅ Supports JSON and human-readable output formats (CLI) / JSON output (API)
-- ✅ Directory-based filtering (include/exclude commits by changed files)
 - ✅ Beautiful colored output in human format (CLI)
 - ✅ Supports GitHub personal access tokens for higher rate limits
 - ✅ CORS-enabled API endpoint for web applications
-- ✅ Node.js 22+ compatible
+- ✅ Node.js 20+ compatible
 
 ## Installation
 
@@ -29,6 +36,42 @@ A Node.js tool that fetches commit information between two Git tags or commit ha
    ```
 
 ## Usage
+
+### Web Interface
+
+1. Start the development server:
+
+   ```bash
+   pnpm dev
+   ```
+
+2. Open http://localhost:3000 in your browser
+3. Fill in the form with repository URL, from reference, and to reference
+4. Click "Get Commits" to see the results
+
+### API Endpoint
+
+The API is available at `/api/git-diff` and accepts the following query parameters:
+
+```
+GET /api/git-diff?repo=<github-repo-url>&from=<from-ref>&to=<to-ref>[&options]
+```
+
+**Required Parameters:**
+- `repo` - GitHub repository URL
+- `from` - Starting tag or commit hash  
+- `to` - Ending tag or commit hash
+
+**Optional Parameters:**
+- `token` - GitHub personal access token
+- `targetDir` - Limit commits to those that changed files in this directory
+- `excludeDir` - Exclude commits that only changed files in this directory
+- `restOnly` - Force use of REST API only (set to `true` or `1`)
+
+**Example:**
+```bash
+curl "http://localhost:3000/api/git-diff?repo=https://github.com/vercel/next.js&from=v14.0.0&to=v14.1.0"
+```
 
 ### CLI Mode
 

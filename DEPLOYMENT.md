@@ -1,11 +1,11 @@
-# Vercel Deployment Guide
+# Next.js Deployment Guide
 
-## 🚀 Quick Deployment
+## 🚀 Quick Deployment to Vercel
 
 ### Method 1: CLI Deployment (Recommended)
 
 ```bash
-# 1. Build the project
+# 1. Build the project locally to test
 pnpm run build
 
 # 2. Deploy to Vercel
@@ -18,36 +18,44 @@ vercel --prod
 ### Method 2: GitHub Integration
 
 1. Push your code to GitHub
-2. Connect repository to Vercel dashboard
-3. Vercel will automatically deploy on push
+2. Go to [vercel.com](https://vercel.com) and import your repository
+3. Vercel will automatically detect it's a Next.js project and deploy
 
 ## ⚙️ Build Configuration
 
-### Build Script
-```json
-{
-  "scripts": {
-    "build": "node -e \"console.log('✅ Build completed - Node.js serverless functions ready')\""
-  }
-}
-```
-
-**Why this build script?**
-- Node.js serverless functions don't need compilation
-- This script just confirms everything is ready
-- Vercel will handle the serverless function deployment
+### Next.js Build
+Next.js handles the build process automatically. The `next build` command:
+- Builds the web application
+- Optimizes the App Router API routes for serverless deployment
+- Generates static assets and optimized bundles
 
 ### Vercel Configuration (`vercel.json`)
 
 ```json
 {
   "version": 2,
-  "functions": {
-    "api/git-diff.js": {
-      "runtime": "nodejs20.x",
-      "maxDuration": 30
-    }
+  "framework": "nextjs",
+  "buildCommand": "next build",
+  "devCommand": "next dev",
+  "installCommand": "pnpm install",
+  "env": {
+    "NODE_ENV": "production"
+  }
+}
+```
+
+**Next.js Configuration (`next.config.js`)**
+
+```javascript
+const nextConfig = {
+  serverExternalPackages: ['@octokit/rest', '@octokit/graphql'],
+  env: {
+    CUSTOM_KEY: process.env.CUSTOM_KEY,
   },
+}
+
+export default nextConfig
+```
   "rewrites": [
     {
       "source": "/git-diff",

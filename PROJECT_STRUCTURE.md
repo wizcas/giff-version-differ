@@ -1,32 +1,37 @@
-# Project Structure Summary
+# Project Structure
 
-## 🎯 **Current Status: Vercel API Project**
+This Next.js application follows the App Router pattern with both a web interface and API functionality.
 
-This project has been successfully refactored to be primarily a **Vercel serverless API** with an optional CLI tool.
-
-### 📁 **File Structure**
+## Directory Structure
 
 ```
 git-version-differ/
-├── api/
-│   └── git-diff.js          # 🌐 Main Vercel serverless function
-├── lib/
-│   └── core.js              # ⚙️ Core business logic (shared)
-├── cli.js                   # 🖥️ Optional CLI tool
-├── index.js                 # 📋 Project info and quick start
-├── local-server.js          # 🏠 Local development server
-├── vercel.json              # ⚙️ Vercel configuration
-├── package.json             # 📦 Dependencies and scripts
-├── README.md                # 📚 Main documentation
-├── index.md                 # 📄 API-focused documentation
-└── QUICK_START.md           # 🚀 Quick setup guide
+├── app/                          # Next.js App Router
+│   ├── api/                      # API routes
+│   │   └── git-diff/            
+│   │       └── route.js          # Main API endpoint
+│   ├── globals.css               # Global styles with Tailwind
+│   ├── layout.js                 # Root layout
+│   └── page.js                   # Home page with form interface
+├── lib/                          # Shared library code
+│   └── core.js                   # Core GitHub API logic
+├── cli.js                        # Command-line interface
+├── next.config.js                # Next.js configuration
+├── tailwind.config.js            # Tailwind CSS configuration
+├── postcss.config.js             # PostCSS configuration
+├── vercel.json                   # Vercel deployment config
+├── package.json                  # Dependencies and scripts
+└── README.md                     # Documentation
 ```
 
-### 🎯 **Primary Purpose: Vercel API**
+## Key Components
 
-- **Main entry point**: `/api/git-diff` 
-- **Purpose**: Serverless GitHub commit difference API
-- **Deploy target**: Vercel
+### Next.js App Router (`app/`)
+
+- **`app/page.js`** - Web interface with form for testing the API
+- **`app/layout.js`** - Root layout with metadata and global styles
+- **`app/globals.css`** - Global styles including Tailwind CSS
+- **`app/api/git-diff/route.js`** - Main API endpoint using Next.js App Router
 
 ### 🖥️ **Secondary Purpose: CLI Tool**
 

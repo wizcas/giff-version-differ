@@ -1,31 +1,32 @@
-# 快速开始指南
+# Quick Start Guide
 
-## 问题解决：Vercel CLI 未安装
+This Next.js application provides both a web interface and API endpoint for Git commit comparison.
 
-如果您遇到 `'vercel' 不是内部或外部命令` 的错误，这是因为 Vercel CLI 没有安装。
+## Getting Started
 
-### 解决方案
-
-我们提供了两种运行 API 服务器的方式：
-
-## 方式 1：本地服务器（推荐，无需登录）
+### 1. Start the Development Server
 
 ```bash
-# 启动本地 API 服务器
-pnpm local-server
+# Start Next.js development server
+pnpm dev
 
-# 在浏览器中测试
-http://localhost:3000/git-diff?repo=https://github.com/octocat/Hello-World&from=v1.0&to=HEAD
+# The server will start on http://localhost:3000 (or next available port)
 ```
 
-## 方式 2：Vercel 开发服务器（需要登录）
+### 2. Using the Web Interface
+
+1. Open http://localhost:3000 in your browser
+2. Fill in the form:
+   - **Repository URL**: https://github.com/owner/repo
+   - **From**: Starting tag or commit (e.g., v1.0.0)
+   - **To**: Ending tag or commit (e.g., v2.0.0)
+3. Click "Get Commits" to see results
+
+### 3. Using the API Directly
 
 ```bash
-# 全局安装 Vercel CLI（已完成）
-pnpm add -g vercel
-
-# 启动 Vercel 开发服务器（需要登录 GitHub）
-pnpm vercel-dev
+# Test the API endpoint
+curl "http://localhost:3000/api/git-diff?repo=https://github.com/octocat/Hello-World&from=v1.0&to=HEAD"
 ```
 
 ## CLI 使用

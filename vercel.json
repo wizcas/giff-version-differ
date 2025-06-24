@@ -1,17 +1,9 @@
 {
   "version": 2,
-  "functions": {
-    "api/git-diff.js": {
-      "runtime": "nodejs20.x",
-      "maxDuration": 30
-    }
-  },
-  "rewrites": [
-    {
-      "source": "/git-diff",
-      "destination": "/api/git-diff"
-    }
-  ],
+  "framework": "nextjs",
+  "buildCommand": "next build",
+  "devCommand": "next dev",
+  "installCommand": "pnpm install",
   "env": {
     "NODE_ENV": "production"
   }

@@ -1,22 +1,20 @@
 {
   "name": "git-version-differ",
   "version": "1.0.0",
-  "description": "A Vercel serverless API to get commit information between two Git tags or commit hashes from GitHub repositories, with optional CLI tool",
+  "description": "A Next.js API to get commit information between two Git tags or commit hashes from GitHub repositories, with optional CLI tool",
   "repository": {
     "type": "git",
     "url": "https://github.com/wizcas/giff-version-differ"
   },
-  "main": "api/git-diff.js",
+  "main": "app/api/git-diff/route.js",
   "type": "module",
   "scripts": {
-    "build": "node -e \"console.log('✅ Build completed - Node.js serverless functions ready')\"",
-    "start": "node index.js",
-    "dev": "node local-server.js",
+    "build": "next build",
+    "start": "next start",
+    "dev": "next dev",
     "cli": "node cli.js",
     "test": "node test-all.js",
     "test-core": "node test-core.js",
-    "local-server": "node local-server.js",
-    "api-dev": "node local-server.js",
     "vercel-dev": "vercel dev",
     "vercel-deploy": "vercel --prod"
   },
@@ -37,13 +35,26 @@
     "@octokit/graphql": "^9.0.1",
     "@octokit/rest": "^20.0.2",
     "chalk": "^5.3.0",
-    "commander": "^11.1.0"
+    "commander": "^11.1.0",
+    "next": "^15.1.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
   },
   "engines": {
     "node": ">=20.0.0"
   },
   "packageManager": "pnpm@10.6.4",
   "devDependencies": {
-    "@vercel/node": "^5.3.0"
+    "@tailwindcss/postcss": "^4.1.10",
+    "@types/node": "^20.17.11",
+    "@types/react": "^18.3.17",
+    "@types/react-dom": "^18.3.5",
+    "@vercel/node": "^5.3.0",
+    "autoprefixer": "^10.4.21",
+    "eslint": "^9.18.0",
+    "eslint-config-next": "^15.1.0",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^4.1.10",
+    "typescript": "^5.7.3"
   }
 }
