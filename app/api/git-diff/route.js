@@ -20,13 +20,12 @@ export async function OPTIONS() {
 
 export async function GET(request) {
   try {
-    const { searchParams } = new URL(request.url);
-    const repo = searchParams.get("repo");
+    const { searchParams } = new URL(request.url);    const repo = searchParams.get("repo");
     const from = searchParams.get("from");
     const to = searchParams.get("to");
     const token = searchParams.get("token");
     const targetDir = searchParams.get("targetDir");
-    const excludeDir = searchParams.get("excludeDir");
+    const excludeSubPaths = searchParams.get("excludeSubPaths");
     const restOnly = searchParams.get("restOnly");
 
     // Validate required parameters
@@ -82,16 +81,14 @@ export async function GET(request) {
           },
         }
       );
-    }
-
-    // Prepare options
+    }    // Prepare options
     const options = {
       repoUrl: repo,
       from,
       to,
       token: token || process.env.GITHUB_TOKEN,
       targetDir: targetDir || null,
-      excludeDir: excludeDir || null,
+      excludeSubPaths: excludeSubPaths || null,
       restOnly: restOnly === "true" || restOnly === "1",
     };
 

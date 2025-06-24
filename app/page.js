@@ -7,7 +7,7 @@ export default function Home() {
   const [fromRef, setFromRef] = useState("");
   const [toRef, setToRef] = useState("");
   const [targetDir, setTargetDir] = useState("");
-  const [excludeDir, setExcludeDir] = useState("");
+  const [excludeSubPaths, setExcludeSubPaths] = useState("");
   const [token, setToken] = useState("");
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -26,14 +26,12 @@ export default function Home() {
 
     params.append("repo", repoValue);
     params.append("from", fromValue);
-    params.append("to", toValue);
-
-    // Optional parameters - only add if they have values
+    params.append("to", toValue); // Optional parameters - only add if they have values
     if (targetDir.trim()) {
       params.append("targetDir", targetDir);
     }
-    if (excludeDir.trim()) {
-      params.append("excludeDir", excludeDir);
+    if (excludeSubPaths.trim()) {
+      params.append("excludeSubPaths", excludeSubPaths);
     }
     if (token.trim()) {
       params.append("token", token);
@@ -71,14 +69,12 @@ export default function Home() {
         repo,
         from: fromRef,
         to: toRef,
-      });
-
-      // Add optional parameters only if they have values
+      }); // Add optional parameters only if they have values
       if (targetDir.trim()) {
         params.append("targetDir", targetDir);
       }
-      if (excludeDir.trim()) {
-        params.append("excludeDir", excludeDir);
+      if (excludeSubPaths.trim()) {
+        params.append("excludeSubPaths", excludeSubPaths);
       }
       if (token.trim()) {
         params.append("token", token);
@@ -254,10 +250,10 @@ export default function Home() {
                       />
                     </div>
                   </div>
-
                   <div className="space-y-3">
-                    <label htmlFor="excludeDir" className="block text-sm font-semibold text-slate-700 dark:text-slate-300">
-                      Exclude Directory
+                    <label htmlFor="excludeSubPaths" className="block text-sm font-semibold text-slate-700 dark:text-slate-300">
+                      Exclude Sub Paths
+                      <span className="text-slate-500 dark:text-slate-400 font-normal ml-1">(comma-separated)</span>
                     </label>
                     <div className="relative">
                       <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
@@ -272,12 +268,16 @@ export default function Home() {
                       </div>
                       <input
                         type="text"
-                        id="excludeDir"
-                        value={excludeDir}
-                        onChange={(e) => setExcludeDir(e.target.value)}
-                        placeholder="node_modules/"
+                        id="excludeSubPaths"
+                        value={excludeSubPaths}
+                        onChange={(e) => setExcludeSubPaths(e.target.value)}
+                        placeholder="node_modules,dist,build"
                         className="w-full pl-12 pr-4 py-4 border border-slate-300 dark:border-slate-600 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-transparent bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 transition-all duration-200"
                       />
+                    </div>
+                    <div className="text-xs text-slate-500 dark:text-slate-400 mt-2">
+                      Enter comma-separated paths relative to target directory. Example:{" "}
+                      <code className="bg-slate-200 dark:bg-slate-700 px-1 rounded">dist,build,tests/fixtures</code>
                     </div>
                   </div>
                 </div>
@@ -587,7 +587,8 @@ export default function Home() {
                     <span className="font-mono text-amber-400">targetDir</span> - Specific directory to analyze (optional)
                   </li>
                   <li>
-                    <span className="font-mono text-amber-400">excludeDir</span> - Directory to exclude from analysis (optional)
+                    <span className="font-mono text-amber-400">excludeSubPaths</span> - Comma-separated sub-paths to exclude from analysis
+                    (optional)
                   </li>
                   <li>
                     <span className="font-mono text-amber-400">token</span> - GitHub personal access token for private repos (optional)
@@ -596,6 +597,31 @@ export default function Home() {
                 <p className="mt-3 text-xs text-slate-400">
                   * Required parameters | Values in red are placeholders and need to be replaced with actual values
                 </p>
+                <div className="mt-4 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg">
+                  <h5 className="font-semibold text-amber-800 dark:text-amber-300 text-sm mb-2">excludeSubPaths Behavior:</h5>
+                  <div className="text-xs text-amber-700 dark:text-amber-300 space-y-1">
+                    <p>• Comma-separated list of sub-paths relative to the target directory</p>
+                    <p>
+                      • Only descendant paths are allowed (no <code className="bg-amber-100 dark:bg-amber-800 px-1 rounded">/</code> or{" "}
+                      <code className="bg-amber-100 dark:bg-amber-800 px-1 rounded">../</code>)
+                    </p>
+                    <p>• Matches files/folders that start with the specified path</p>
+                    <p>
+                      <strong>Example:</strong> If targetDir=<code className="bg-amber-100 dark:bg-amber-800 px-1 rounded">src/a</code> and
+                      excludeSubPaths=<code className="bg-amber-100 dark:bg-amber-800 px-1 rounded">b,c/d,e</code>
+                    </p>
+                    <div className="ml-4 mt-1">
+                      <p className="text-green-600 dark:text-green-400">
+                        ✓ Includes: <code className="bg-amber-100 dark:bg-amber-800 px-1 rounded">src/a/readme.md</code>,{" "}
+                        <code className="bg-amber-100 dark:bg-amber-800 px-1 rounded">src/a/example.json</code>
+                      </p>
+                      <p className="text-red-600 dark:text-red-400">
+                        ✗ Excludes: <code className="bg-amber-100 dark:bg-amber-800 px-1 rounded">src/a/b/file.js</code>,{" "}
+                        <code className="bg-amber-100 dark:bg-amber-800 px-1 rounded">src/a/c/d/test.js</code>
+                      </p>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
