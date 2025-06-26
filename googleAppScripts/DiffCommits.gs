@@ -14,6 +14,9 @@ const API_TOKEN = "<TOKEN>";
 // Base URL for the repository that will be concatenated with the `Repo` metadata
 // <<< IMPORTANT: Do not end with a slash. Example: "https://github.com/microsoft/vscode"
 const REPO_BASE_URL = "<REPO_BASE_URL>";
+// Base URL for JIRA tickets
+// <<< IMPORTANT: Do not end with a slash. Example: "https://yourcompany.atlassian.net/browse"
+const JIRA_BASE_URL = "<JIRA_BASE_URL>";
 
 // Streaming API configuration
 const USE_STREAMING_API = true; // Set to false to use regular API
@@ -45,10 +48,13 @@ function doGet(e) {
     return createHtmlResponse("Error: you must run this link on the row of a product service.");
   }
 
-  // Use a LockService to prevent concurrent modifications on the same sheet.
-  // This is crucial for operations that modify the sheet structure.
-  const lock = LockService.getScriptLock();
-  lock.waitLock(30000); // Wait up to 30 seconds for the lock
+  // Track start time for elapsed time calculation
+  const startTime = new Date();
+
+  // // Use a LockService to prevent concurrent modifications on the same sheet.
+  // // This is crucial for operations that modify the sheet structure.
+  // const lock = LockService.getScriptLock();
+  // lock.waitLock(30000); // Wait up to 30 seconds for the lock
 
   let responseHtml = "";
   try {
@@ -76,14 +82,22 @@ function doGet(e) {
 
     if (missingColumns.length > 0) {
       const errorMessage = `Error: Missing data in row ${targetRow} for columns: ${missingColumns.join(", ")}.`;
+      // Try to update status display even with missing data, using what we have
+      if (serviceName) {
+        updateStatusDisplay(mainSheet, serviceName, `❌ Missing data: ${missingColumns.join(", ")}`);
+      }
       Logger.log(errorMessage);
       return createHtmlResponse(errorMessage);
     }
+
+    // Show validation success
+    updateStatusDisplay(mainSheet, serviceName, "Validating metadata...");
 
     // 2. From Metadata sheet, retrieve predefined settings: repo, targetDir, excludeSubPaths
     const metadata = getMetadataForService(serviceName);
     if (!metadata) {
       const errorMessage = `Error: No metadata found for service "${serviceName}" in the "${METADATA_SHEET_NAME}" sheet.`;
+      updateStatusDisplay(mainSheet, serviceName, `❌ No metadata found for service`);
       Logger.log(errorMessage);
       return createHtmlResponse(errorMessage);
     }
@@ -104,6 +118,9 @@ function doGet(e) {
 
     Logger.log(`Calling Streaming API: ${streamApiUrl}`);
 
+    // Show initial status to user
+    updateStatusDisplay(mainSheet, serviceName, "Pulling...It may take several minutes. Please wait.");
+
     let commits = [];
     let apiStats = {};
     let apiMethod = "unknown";
@@ -111,21 +128,33 @@ function doGet(e) {
     if (!dryRun) {
       if (USE_STREAMING_API) {
         try {
+          // Update status for streaming API
+          updateStatusDisplay(
+            mainSheet,
+            serviceName,
+            "Using streaming API for faster processing...\nIt may take several minutes. Please wait."
+          );
+
           // Try streaming API first
-          const streamResult = processStreamingApiResponse(streamApiUrl);
+          const streamResult = processStreamingApiResponse(streamApiUrl, mainSheet, serviceName);
           commits = streamResult.commits;
           apiStats = streamResult.stats;
           apiMethod = "streaming";
 
+          updateStatusDisplay(mainSheet, serviceName, `Streaming completed: ${commits.length} commits received`);
           Logger.log(`Streaming API completed: ${commits.length} commits received`);
           if (apiStats.fetchStats) {
             Logger.log(`API Efficiency: ${apiStats.fetchStats.totalChecked} commits checked, ${apiStats.fetchStats.requestCount} requests`);
           }
         } catch (streamError) {
+          const currentTime = new Date();
+          const elapsedTime = `${((currentTime - startTime) / 1000).toFixed(1)}s`;
+          updateStatusDisplay(mainSheet, serviceName, `Streaming failed after ${elapsedTime}, trying regular API...`);
           Logger.log(`Streaming API failed: ${streamError.message}`);
           Logger.log(`Falling back to regular API...`);
 
           // Fallback to regular API
+          updateStatusDisplay(mainSheet, serviceName, "Calling regular API...\nIt may take several minutes. Please wait.");
           const regularApiUrl = buildRegularApiUrl({
             repo,
             from: fromVersion,
@@ -140,17 +169,22 @@ function doGet(e) {
           const responseBody = apiResponse.getContentText();
 
           if (responseCode !== 200) {
+            const currentTime = new Date();
+            const elapsedTime = `${((currentTime - startTime) / 1000).toFixed(1)}s`;
             const errorMessage = `Both Streaming and Regular API failed. Last error: Status ${responseCode}, Response: ${responseBody}`;
+            updateStatusDisplay(mainSheet, serviceName, `❌ Error: API calls failed (after ${elapsedTime})`);
             Logger.log(errorMessage);
             return createHtmlResponse(errorMessage);
           }
 
+          updateStatusDisplay(mainSheet, serviceName, "Regular API completed, processing results...");
           const data = JSON.parse(responseBody);
           commits = data.commits;
           apiMethod = "regular-fallback";
         }
       } else {
         // Use regular API directly
+        updateStatusDisplay(mainSheet, serviceName, "Using regular API...");
         const regularApiUrl = buildRegularApiUrl({
           repo,
           from: fromVersion,
@@ -167,28 +201,74 @@ function doGet(e) {
         const responseBody = apiResponse.getContentText();
 
         if (responseCode !== 200) {
+          const currentTime = new Date();
+          const elapsedTime = `${((currentTime - startTime) / 1000).toFixed(1)}s`;
           const errorMessage = `API Error: Status ${responseCode}, Response: ${responseBody}`;
+          updateStatusDisplay(mainSheet, serviceName, `❌ Error: API call failed (after ${elapsedTime})`);
           Logger.log(errorMessage);
           return createHtmlResponse(errorMessage);
         }
 
+        updateStatusDisplay(mainSheet, serviceName, "Regular API completed, processing results...");
         const data = JSON.parse(responseBody);
         commits = data.commits;
         apiMethod = "regular";
       }
+    } else {
+      // Dry run mode - no actual API call
+      updateStatusDisplay(mainSheet, serviceName, "✅ Dry run completed - no API call made");
+      commits = []; // Empty commits array for dry run
+      apiMethod = "dry-run";
     }
 
     if (!commits || !Array.isArray(commits)) {
+      const currentTime = new Date();
+      const elapsedTime = `${((currentTime - startTime) / 1000).toFixed(1)}s`;
       const errorMessage = `API Error: 'commits' field not found or not an array in API response.`;
+      updateStatusDisplay(mainSheet, serviceName, `❌ Error: Invalid API response (after ${elapsedTime})`);
       Logger.log(errorMessage);
       return createHtmlResponse(errorMessage);
     }
 
-    // 5. Delete existing commits and insert the newly fetched ones
-    insertCommitsIntoSheet(mainSheet, targetRow, commits);
+    // Handle dry run or empty results
+    if (commits.length === 0 && !dryRun) {
+      updateStatusDisplay(mainSheet, serviceName, "✅ No commits found in range");
+    }
+
+    // 5. Re-find the target row using serviceName (sheet may have changed during API call)
+    updateStatusDisplay(mainSheet, serviceName, "Processing commits and updating sheet...");
+    Logger.log(`Re-finding target row for service: "${serviceName}"`);
+    const updatedTargetRow = findTargetRowByServiceName(mainSheet, serviceName);
+
+    if (!updatedTargetRow) {
+      const errorMessage = `Error: Service "${serviceName}" not found in sheet after API call. The sheet may have been modified during processing.`;
+      Logger.log(errorMessage);
+      return createHtmlResponse(errorMessage);
+    }
+
+    if (updatedTargetRow !== targetRow) {
+      Logger.log(
+        `⚠️ Target row changed during API call: original=${targetRow}, updated=${updatedTargetRow}. Sheet was likely modified during processing.`
+      );
+    } else {
+      Logger.log(`✅ Target row remains stable: ${targetRow}`);
+    }
+
+    // Delete existing commits and insert the newly fetched ones using updated row
+    insertCommitsIntoSheet(mainSheet, updatedTargetRow, commits, repo);
+
+    // Update final success status
+    let successStatusMessage = `✅ Completed: ${commits.length} commits inserted`;
+    if (apiStats.fetchStats && apiStats.fetchStats.requestCount) {
+      successStatusMessage += ` (${apiStats.fetchStats.requestCount} API requests)`;
+    }
+    if (apiStats.elapsedTime) {
+      successStatusMessage += ` in ${apiStats.elapsedTime}`;
+    }
+    updateStatusDisplay(mainSheet, serviceName, successStatusMessage);
 
     // Build success message with API statistics
-    let successMessage = `Successfully processed row ${targetRow} and inserted ${commits.length} commits using ${apiMethod} API.`;
+    let successMessage = `Successfully processed row ${updatedTargetRow} (originally ${targetRow}) and inserted ${commits.length} commits using ${apiMethod} API.`;
     if (apiStats.fetchStats) {
       successMessage += ` API efficiency: ${apiStats.fetchStats.totalChecked || "N/A"} commits checked in ${
         apiStats.fetchStats.requestCount || "N/A"
@@ -201,11 +281,14 @@ function doGet(e) {
     responseHtml = successMessage;
     Logger.log(responseHtml);
   } catch (error) {
+    const endTime = new Date();
+    const elapsedTime = `${((endTime - startTime) / 1000).toFixed(1)}s`;
     const errorMessage = `An unexpected error occurred: ${error.message}`;
+    updateStatusDisplay(mainSheet, serviceName, `❌ Error: ${error.message} (after ${elapsedTime})`);
     Logger.log(errorMessage);
     return createHtmlResponse(errorMessage);
   } finally {
-    lock.releaseLock(); // Release the lock whether successful or not
+    // lock.releaseLock(); // Release the lock whether successful or not
   }
 
   return createHtmlResponse(responseHtml);
@@ -286,9 +369,11 @@ function getMetadataForService(serviceName) {
 /**
  * Processes the streaming API response and collects all commits.
  * @param {string} streamApiUrl The streaming API URL to call.
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet The sheet to update status in.
+ * @param {string} serviceName The service name for status updates.
  * @returns {Object} An object containing commits array and stats.
  */
-function processStreamingApiResponse(streamApiUrl) {
+function processStreamingApiResponse(streamApiUrl, sheet, serviceName) {
   try {
     // Make the streaming API call with extended timeout
     const response = UrlFetchApp.fetch(streamApiUrl, {
@@ -330,11 +415,16 @@ function processStreamingApiResponse(streamApiUrl) {
 
         switch (data.type) {
           case "start":
+            updateStatusDisplay(sheet, serviceName, `Starting: ${data.repoUrl} (${data.from} → ${data.to})`);
             Logger.log(`Streaming started for ${data.repoUrl} (${data.from} → ${data.to})`);
             break;
 
           case "progress":
             progressCount++;
+            // Update status display with progress (but not too frequently)
+            if (progressCount % 3 === 0) {
+              updateStatusDisplay(sheet, serviceName, `Progress: ${data.status}`);
+            }
             if (progressCount % 5 === 0) {
               // Log every 5th progress update to avoid spam
               Logger.log(`Progress: ${data.status}`);
@@ -345,11 +435,13 @@ function processStreamingApiResponse(streamApiUrl) {
             // Accumulate commits from batches
             if (data.commits && Array.isArray(data.commits)) {
               allCommits = allCommits.concat(data.commits);
+              updateStatusDisplay(sheet, serviceName, `Received: ${allCommits.length} commits so far...`);
               Logger.log(`Received batch: ${data.commits.length} commits (total: ${allCommits.length})`);
             }
             break;
 
           case "complete":
+            updateStatusDisplay(sheet, serviceName, `Stream completed: ${data.totalCommits} commits`);
             Logger.log(`Streaming completed: ${data.totalCommits} total commits`);
             finalStats = {
               totalCommits: data.totalCommits,
@@ -363,6 +455,7 @@ function processStreamingApiResponse(streamApiUrl) {
           case "error":
             hasError = true;
             errorMessage = data.error;
+            updateStatusDisplay(sheet, serviceName, `Streaming error: ${errorMessage}`);
             Logger.log(`Streaming error: ${errorMessage}`);
             break;
 
@@ -464,12 +557,48 @@ function buildRegularApiUrl(params) {
 }
 
 /**
+ * Extracts pull request ID from commit message.
+ * @param {string} message The commit message to parse.
+ * @returns {string|null} The pull request ID if found, null otherwise.
+ */
+function extractPullRequestId(message) {
+  // Common patterns for PR references in commit messages
+  const patterns = [
+    /\(#(\d+)\)/, // (#{number})
+    /#(\d+)/, // #{number}
+    /pull\/(\d+)/i, // pull/{number}
+    /pr\/(\d+)/i, // pr/{number}
+    /merge pull request #(\d+)/i, // merge pull request #{number}
+  ];
+
+  for (const pattern of patterns) {
+    const match = message.match(pattern);
+    if (match) {
+      return match[1];
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Extracts the first line of a commit message and adds the checkmark prefix
+ * @param {string} fullMessage - The full commit message
+ * @returns {string} The first line with "☑️ " prefix
+ */
+function getFormattedFirstLineMessage(fullMessage) {
+  const firstLine = (fullMessage || "").split("\n")[0].trim();
+  return "☑️ " + firstLine;
+}
+
+/**
  * Inserts commit data into the sheet, clearing existing rows below the target.
  * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet The sheet to modify.
  * @param {number} targetRow The row where the initial service data is.
  * @param {Array<Object>} commits An array of commit objects.
+ * @param {string} repo The full repository URL for constructing PR links.
  */
-function insertCommitsIntoSheet(sheet, targetRow, commits) {
+function insertCommitsIntoSheet(sheet, targetRow, commits, repo) {
   // Find the row number of the next service entry
   const lastRow = sheet.getLastRow();
   let nextServiceRow = lastRow + 1; // Default to end of sheet if no more services below
@@ -499,14 +628,20 @@ function insertCommitsIntoSheet(sheet, targetRow, commits) {
 
   // Prepare commit data for insertion
   const dataToInsert = commits.map((commit) => {
-    // Ensure all fields are handled, providing empty string if missing
-    const message = commit.message || "";
+    // Get the full commit message and extract first line only
+    const fullMessage = commit.message || "";
+    const firstLineMessage = getFormattedFirstLineMessage(fullMessage);
+
     const date = new Date(commit.date) || "";
     const author = commit.author || "";
-    const jiraTicketId = commit.jiraTicketId || ""; // Assuming API returns this
-    const semverType = commit.semverType || ""; // Assuming API returns this
+    const jiraTicketId = commit.jiraTicketId || "";
+    const semverType = commit.semverType || "";
 
-    return ["", "", "", message, date, author, jiraTicketId, semverType]; // D,E,F,G,H columns for commits
+    // Extract pull request ID from the original first line (without prefix)
+    const originalFirstLine = (fullMessage || "").split("\n")[0].trim();
+    const pullRequestId = extractPullRequestId(originalFirstLine);
+
+    return ["", "", "", firstLineMessage, date, author, jiraTicketId, semverType]; // D,E,F,G,H columns for commits
     // A,B,C are empty for these rows
   });
 
@@ -517,8 +652,41 @@ function insertCommitsIntoSheet(sheet, targetRow, commits) {
 
     // Insert new rows for commits
     sheet.insertRowsAfter(targetRow, numRows);
+
+    // Get the range for the inserted rows
+    const insertedRange = sheet.getRange(startRow, 1, numRows, numCols);
+
     // Write data to the inserted rows
-    sheet.getRange(startRow, 1, numRows, numCols).setValues(dataToInsert);
+    insertedRange.setValues(dataToInsert);
+
+    // Clear any background colors from the inserted rows
+    insertedRange.setBackground(null);
+
+    // Now add hyperlinks to the appropriate cells
+    for (let i = 0; i < commits.length; i++) {
+      const commit = commits[i];
+      const currentRow = startRow + i;
+
+      // Add hyperlink for commit message with PR ID (column D)
+      const fullMessage = commit.message || "";
+      const firstLineMessage = getFormattedFirstLineMessage(fullMessage);
+      const originalFirstLine = (fullMessage || "").split("\n")[0].trim();
+      const pullRequestId = extractPullRequestId(originalFirstLine);
+
+      if (pullRequestId) {
+        const messageCell = sheet.getRange(currentRow, 4); // Column D
+        const prUrl = `${repo}/pull/${pullRequestId}`;
+        messageCell.setFormula(`=HYPERLINK("${prUrl}", "${firstLineMessage.replace(/"/g, '""')}")`);
+      }
+
+      // Add hyperlink for Jira ticket ID (column G)
+      const jiraTicketId = commit.jiraTicketId;
+      if (jiraTicketId && jiraTicketId.trim() !== "") {
+        const jiraCell = sheet.getRange(currentRow, 7); // Column G
+        const jiraUrl = `${JIRA_BASE_URL}/${jiraTicketId}`;
+        jiraCell.setFormula(`=HYPERLINK("${jiraUrl}", "${jiraTicketId}")`);
+      }
+    }
   }
 
   SpreadsheetApp.flush(); // Apply all pending spreadsheet changes
@@ -546,6 +714,101 @@ function setApiToken() {
  */
 function getApiToken() {
   return PropertiesService.getUserProperties().getProperty("GIT_DIFF_API_TOKEN");
+}
+
+/**
+ * Finds the target row for a service by searching for the serviceName in column A.
+ * The serviceName should match the ending part of the cell value (after a newline if present).
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet The sheet to search in.
+ * @param {string} serviceName The service name to search for.
+ * @returns {number|null} The row number if found, null if not found.
+ */
+function findTargetRowByServiceName(sheet, serviceName) {
+  const lastRow = sheet.getLastRow();
+
+  if (lastRow < 2) {
+    // No data rows to search
+    return null;
+  }
+
+  // Get all values in column A (excluding header row)
+  const columnAValues = sheet.getRange(2, 1, lastRow - 1, 1).getDisplayValues();
+
+  for (let i = 0; i < columnAValues.length; i++) {
+    const cellValue = columnAValues[i][0];
+
+    if (cellValue) {
+      const cellContent = String(cellValue);
+      const lines = cellContent.split("\n");
+
+      // Extract service name (same logic as in the main function)
+      let extractedServiceName = "";
+      if (lines.length > 1) {
+        extractedServiceName = lines[1].trim(); // Get the second line and trim whitespace
+      } else {
+        extractedServiceName = lines[0].trim(); // If only one line, take that one
+      }
+
+      // Check if this matches our target service name
+      if (extractedServiceName === serviceName) {
+        return i + 2; // Convert back to 1-based row number (i is 0-based, +2 to account for header row)
+      }
+    }
+  }
+
+  return null; // Service not found
+}
+
+/**
+ * Updates the status display in column E of the target row.
+ * Always finds the row by service name to handle sheet changes.
+ * Applies color coding based on status type.
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet The sheet to update.
+ * @param {string} serviceName The service name to find.
+ * @param {string} status The status message to display.
+ */
+function updateStatusDisplay(sheet, serviceName, status) {
+  try {
+    const targetRow = findTargetRowByServiceName(sheet, serviceName);
+
+    if (!targetRow) {
+      Logger.log(`Warning: Could not find service "${serviceName}" to update status display`);
+      return;
+    }
+
+    // Get the cell range for column E
+    const statusCell = sheet.getRange(targetRow, 5);
+
+    // Update the cell value
+    statusCell.setValue(status);
+
+    // Determine background color based on status content
+    let backgroundColor = null; // Default (no background)
+
+    if (status.includes("❌") || status.toLowerCase().includes("error") || status.toLowerCase().includes("failed")) {
+      // Error status - light red background
+      backgroundColor = "#ffebee"; // Light red
+    } else if (status.includes("✅") || status.toLowerCase().includes("completed") || status.toLowerCase().includes("complete")) {
+      // Success status - remove background color
+      backgroundColor = null;
+    } else {
+      // Work in progress status - light yellow background
+      backgroundColor = "#fff9c4"; // Light yellow
+    }
+
+    // Apply background color
+    if (backgroundColor) {
+      statusCell.setBackground(backgroundColor);
+    } else {
+      statusCell.setBackground(null); // Remove background
+    }
+
+    SpreadsheetApp.flush(); // Ensure immediate update
+
+    Logger.log(`Status updated for ${serviceName} (row ${targetRow}): ${status}`);
+  } catch (error) {
+    Logger.log(`Error updating status display: ${error.message}`);
+  }
 }
 
 function test() {
