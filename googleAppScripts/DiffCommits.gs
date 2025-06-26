@@ -45,10 +45,10 @@ function doGet(e) {
     return createHtmlResponse("Error: you must run this link on the row of a product service.");
   }
 
-  // Use a LockService to prevent concurrent modifications on the same sheet.
-  // This is crucial for operations that modify the sheet structure.
-  const lock = LockService.getScriptLock();
-  lock.waitLock(30000); // Wait up to 30 seconds for the lock
+  // // Use a LockService to prevent concurrent modifications on the same sheet.
+  // // This is crucial for operations that modify the sheet structure.
+  // const lock = LockService.getScriptLock();
+  // lock.waitLock(30000); // Wait up to 30 seconds for the lock
 
   let responseHtml = "";
   try {
@@ -123,7 +123,11 @@ function doGet(e) {
       if (USE_STREAMING_API) {
         try {
           // Update status for streaming API
-          updateStatusDisplay(mainSheet, serviceName, "Using streaming API for faster processing...");
+          updateStatusDisplay(
+            mainSheet,
+            serviceName,
+            "Using streaming API for faster processing...\nIt may take 1-2 minutes. Please wait."
+          );
 
           // Try streaming API first
           const streamResult = processStreamingApiResponse(streamApiUrl, mainSheet, serviceName);
@@ -142,7 +146,7 @@ function doGet(e) {
           Logger.log(`Falling back to regular API...`);
 
           // Fallback to regular API
-          updateStatusDisplay(mainSheet, serviceName, "Calling regular API...");
+          updateStatusDisplay(mainSheet, serviceName, "Calling regular API...\nIt may take 1-2 minutes. Please wait.");
           const regularApiUrl = buildRegularApiUrl({
             repo,
             from: fromVersion,
@@ -265,7 +269,7 @@ function doGet(e) {
     Logger.log(errorMessage);
     return createHtmlResponse(errorMessage);
   } finally {
-    lock.releaseLock(); // Release the lock whether successful or not
+    // lock.releaseLock(); // Release the lock whether successful or not
   }
 
   return createHtmlResponse(responseHtml);
@@ -664,6 +668,7 @@ function findTargetRowByServiceName(sheet, serviceName) {
 /**
  * Updates the status display in column E of the target row.
  * Always finds the row by service name to handle sheet changes.
+ * Applies color coding based on status type.
  * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet The sheet to update.
  * @param {string} serviceName The service name to find.
  * @param {string} status The status message to display.
@@ -677,8 +682,33 @@ function updateStatusDisplay(sheet, serviceName, status) {
       return;
     }
 
-    // Update column E (5th column) with the status
-    sheet.getRange(targetRow, 5).setValue(status);
+    // Get the cell range for column E
+    const statusCell = sheet.getRange(targetRow, 5);
+
+    // Update the cell value
+    statusCell.setValue(status);
+
+    // Determine background color based on status content
+    let backgroundColor = null; // Default (no background)
+
+    if (status.includes("❌") || status.toLowerCase().includes("error") || status.toLowerCase().includes("failed")) {
+      // Error status - light red background
+      backgroundColor = "#ffebee"; // Light red
+    } else if (status.includes("✅") || status.toLowerCase().includes("completed") || status.toLowerCase().includes("complete")) {
+      // Success status - remove background color
+      backgroundColor = null;
+    } else {
+      // Work in progress status - light yellow background
+      backgroundColor = "#fff9c4"; // Light yellow
+    }
+
+    // Apply background color
+    if (backgroundColor) {
+      statusCell.setBackground(backgroundColor);
+    } else {
+      statusCell.setBackground(null); // Remove background
+    }
+
     SpreadsheetApp.flush(); // Ensure immediate update
 
     Logger.log(`Status updated for ${serviceName} (row ${targetRow}): ${status}`);
