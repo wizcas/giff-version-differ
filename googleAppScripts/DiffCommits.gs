@@ -14,6 +14,9 @@ const API_TOKEN = "<TOKEN>";
 // Base URL for the repository that will be concatenated with the `Repo` metadata
 // <<< IMPORTANT: Do not end with a slash. Example: "https://github.com/microsoft/vscode"
 const REPO_BASE_URL = "<REPO_BASE_URL>";
+// Base URL for JIRA tickets
+// <<< IMPORTANT: Do not end with a slash. Example: "https://yourcompany.atlassian.net/browse"
+const JIRA_BASE_URL = "<JIRA_BASE_URL>";
 
 // Streaming API configuration
 const USE_STREAMING_API = true; // Set to false to use regular API
@@ -113,7 +116,7 @@ function doGet(e) {
     Logger.log(`Calling Streaming API: ${streamApiUrl}`);
 
     // Show initial status to user
-    updateStatusDisplay(mainSheet, serviceName, "Pulling...It may take 1-2 minutes. Please wait.");
+    updateStatusDisplay(mainSheet, serviceName, "Pulling...It may take several minutes. Please wait.");
 
     let commits = [];
     let apiStats = {};
@@ -126,7 +129,7 @@ function doGet(e) {
           updateStatusDisplay(
             mainSheet,
             serviceName,
-            "Using streaming API for faster processing...\nIt may take 1-2 minutes. Please wait."
+            "Using streaming API for faster processing...\nIt may take several minutes. Please wait."
           );
 
           // Try streaming API first
@@ -146,7 +149,7 @@ function doGet(e) {
           Logger.log(`Falling back to regular API...`);
 
           // Fallback to regular API
-          updateStatusDisplay(mainSheet, serviceName, "Calling regular API...\nIt may take 1-2 minutes. Please wait.");
+          updateStatusDisplay(mainSheet, serviceName, "Calling regular API...\nIt may take several minutes. Please wait.");
           const regularApiUrl = buildRegularApiUrl({
             repo,
             from: fromVersion,
@@ -241,7 +244,7 @@ function doGet(e) {
     }
 
     // Delete existing commits and insert the newly fetched ones using updated row
-    insertCommitsIntoSheet(mainSheet, updatedTargetRow, commits);
+    insertCommitsIntoSheet(mainSheet, updatedTargetRow, commits, repo);
 
     // Update final success status
     let successStatusMessage = `✅ Completed: ${commits.length} commits inserted`;
@@ -538,12 +541,48 @@ function buildRegularApiUrl(params) {
 }
 
 /**
+ * Extracts pull request ID from commit message.
+ * @param {string} message The commit message to parse.
+ * @returns {string|null} The pull request ID if found, null otherwise.
+ */
+function extractPullRequestId(message) {
+  // Common patterns for PR references in commit messages
+  const patterns = [
+    /\(#(\d+)\)/, // (#{number})
+    /#(\d+)/, // #{number}
+    /pull\/(\d+)/i, // pull/{number}
+    /pr\/(\d+)/i, // pr/{number}
+    /merge pull request #(\d+)/i, // merge pull request #{number}
+  ];
+
+  for (const pattern of patterns) {
+    const match = message.match(pattern);
+    if (match) {
+      return match[1];
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Extracts the first line of a commit message and adds the checkmark prefix
+ * @param {string} fullMessage - The full commit message
+ * @returns {string} The first line with "☑️ " prefix
+ */
+function getFormattedFirstLineMessage(fullMessage) {
+  const firstLine = (fullMessage || "").split("\n")[0].trim();
+  return "☑️ " + firstLine;
+}
+
+/**
  * Inserts commit data into the sheet, clearing existing rows below the target.
  * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet The sheet to modify.
  * @param {number} targetRow The row where the initial service data is.
  * @param {Array<Object>} commits An array of commit objects.
+ * @param {string} repo The full repository URL for constructing PR links.
  */
-function insertCommitsIntoSheet(sheet, targetRow, commits) {
+function insertCommitsIntoSheet(sheet, targetRow, commits, repo) {
   // Find the row number of the next service entry
   const lastRow = sheet.getLastRow();
   let nextServiceRow = lastRow + 1; // Default to end of sheet if no more services below
@@ -573,14 +612,20 @@ function insertCommitsIntoSheet(sheet, targetRow, commits) {
 
   // Prepare commit data for insertion
   const dataToInsert = commits.map((commit) => {
-    // Ensure all fields are handled, providing empty string if missing
-    const message = commit.message || "";
+    // Get the full commit message and extract first line only
+    const fullMessage = commit.message || "";
+    const firstLineMessage = getFormattedFirstLineMessage(fullMessage);
+
     const date = new Date(commit.date) || "";
     const author = commit.author || "";
-    const jiraTicketId = commit.jiraTicketId || ""; // Assuming API returns this
-    const semverType = commit.semverType || ""; // Assuming API returns this
+    const jiraTicketId = commit.jiraTicketId || "";
+    const semverType = commit.semverType || "";
 
-    return ["", "", "", message, date, author, jiraTicketId, semverType]; // D,E,F,G,H columns for commits
+    // Extract pull request ID from the original first line (without prefix)
+    const originalFirstLine = (fullMessage || "").split("\n")[0].trim();
+    const pullRequestId = extractPullRequestId(originalFirstLine);
+
+    return ["", "", "", firstLineMessage, date, author, jiraTicketId, semverType]; // D,E,F,G,H columns for commits
     // A,B,C are empty for these rows
   });
 
@@ -591,8 +636,41 @@ function insertCommitsIntoSheet(sheet, targetRow, commits) {
 
     // Insert new rows for commits
     sheet.insertRowsAfter(targetRow, numRows);
+
+    // Get the range for the inserted rows
+    const insertedRange = sheet.getRange(startRow, 1, numRows, numCols);
+
     // Write data to the inserted rows
-    sheet.getRange(startRow, 1, numRows, numCols).setValues(dataToInsert);
+    insertedRange.setValues(dataToInsert);
+
+    // Clear any background colors from the inserted rows
+    insertedRange.setBackground(null);
+
+    // Now add hyperlinks to the appropriate cells
+    for (let i = 0; i < commits.length; i++) {
+      const commit = commits[i];
+      const currentRow = startRow + i;
+
+      // Add hyperlink for commit message with PR ID (column D)
+      const fullMessage = commit.message || "";
+      const firstLineMessage = getFormattedFirstLineMessage(fullMessage);
+      const originalFirstLine = (fullMessage || "").split("\n")[0].trim();
+      const pullRequestId = extractPullRequestId(originalFirstLine);
+
+      if (pullRequestId) {
+        const messageCell = sheet.getRange(currentRow, 4); // Column D
+        const prUrl = `${repo}/pull/${pullRequestId}`;
+        messageCell.setFormula(`=HYPERLINK("${prUrl}", "${firstLineMessage.replace(/"/g, '""')}")`);
+      }
+
+      // Add hyperlink for Jira ticket ID (column G)
+      const jiraTicketId = commit.jiraTicketId;
+      if (jiraTicketId && jiraTicketId.trim() !== "") {
+        const jiraCell = sheet.getRange(currentRow, 7); // Column G
+        const jiraUrl = `${JIRA_BASE_URL}/${jiraTicketId}`;
+        jiraCell.setFormula(`=HYPERLINK("${jiraUrl}", "${jiraTicketId}")`);
+      }
+    }
   }
 
   SpreadsheetApp.flush(); // Apply all pending spreadsheet changes
