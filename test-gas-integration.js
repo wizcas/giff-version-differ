@@ -37,25 +37,21 @@ function testGitDifferStreaming() {
 }
 
 function fetchCommitsStream(config) {
-  const params = new URLSearchParams({
-    repo: config.repo,
-    from: config.from,
-    to: config.to,
-  });
+  const params = [`repo=${config.repo}`, `from=${config.from}`, `to=${config.to}`];
 
   if (config.token) {
-    params.append("token", config.token);
+    params.push(`token=${config.token}`);
   }
 
   if (config.targetDir) {
-    params.append("targetDir", config.targetDir);
+    params.push(`targetDir=${config.targetDir}`);
   }
 
   if (config.excludeSubPaths) {
-    params.append("excludeSubPaths", config.excludeSubPaths);
+    params.push(`excludeSubPaths=${config.targetDir}`);
   }
 
-  const url = `${config.baseUrl}/api/git-diff/stream?${params.toString()}`;
+  const url = `${config.baseUrl}/api/git-diff/stream?${params.filter(Boolean).join("&")}`;
   console.log("Fetching:", url);
 
   // In Google Apps Script, use UrlFetchApp
@@ -71,55 +67,78 @@ function fetchCommitsStream(config) {
     throw new Error(`HTTP ${response.getResponseCode()}: ${response.getContentText()}`);
   }
 
-  const lines = response.getContentText().split("\\n");
+  const responseText = response.getContentText();
+  console.log(`Response length: ${responseText.length} characters`);
+
+  // Parse JSON Lines format: each line should be a complete JSON object
+  // JSON.stringify() properly escapes newlines as \n within strings
   let allCommits = [];
   let totalCommits = 0;
   let elapsedTime = "0ms";
   let processingStatus = "Starting...";
 
-  console.log(`Processing ${lines.length} response lines...`);
+  // Split response into lines - each line should be a complete JSON object
+  const lines = responseText.split("\n");
+  console.log(`Processing ${lines.length} lines...`);
+
+  let processedLines = 0;
 
   lines.forEach((line, index) => {
-    if (line.trim()) {
-      try {
-        const data = JSON.parse(line);
+    const trimmedLine = line.trim();
+    if (!trimmedLine) return; // Skip empty lines
 
-        switch (data.type) {
-          case "start":
-            console.log(`📡 Started: ${data.repoUrl} (${data.timestamp})`);
-            processingStatus = "Processing...";
-            break;
+    try {
+      const data = JSON.parse(trimmedLine);
+      processedLines++;
 
-          case "progress":
-            console.log(`⏳ ${data.status}`);
-            processingStatus = data.status;
-            break;
+      switch (data.type) {
+        case "start":
+          console.log(`📡 Started: ${data.repoUrl} (${data.timestamp})`);
+          processingStatus = "Processing...";
+          break;
 
-          case "commits":
-            allCommits = allCommits.concat(data.commits);
-            console.log(
-              `📦 Batch ${Math.floor(index / 10) + 1}: +${data.commits.length} commits (${data.progress.processed}/${data.progress.total})`
-            );
-            break;
+        case "progress":
+          console.log(`⏳ ${data.status}`);
+          processingStatus = data.status;
+          break;
 
-          case "complete":
-            totalCommits = data.totalCommits;
-            elapsedTime = data.elapsedTime;
-            console.log(`✅ Complete: ${totalCommits} commits in ${elapsedTime}`);
-            processingStatus = "Completed";
-            break;
+        case "commits":
+          allCommits = allCommits.concat(data.commits);
+          console.log(`📦 Event ${processedLines}: +${data.commits.length} commits (${data.progress.processed}/${data.progress.total})`);
+          // Log first commit for debugging
+          if (data.commits.length > 0) {
+            const firstCommit = data.commits[0];
+            console.log(`   Sample: ${firstCommit.hash} - ${firstCommit.message.substring(0, 50)}...`);
+          }
+          break;
 
-          case "error":
-            throw new Error(`API Error: ${data.error}`);
+        case "complete":
+          totalCommits = data.totalCommits;
+          elapsedTime = data.elapsedTime;
+          console.log(`✅ Complete: ${totalCommits} commits in ${elapsedTime}`);
+          processingStatus = "Completed";
+          break;
 
-          default:
-            console.log(`Unknown event type: ${data.type}`);
-        }
-      } catch (parseError) {
-        console.warn(`Failed to parse line ${index + 1}: ${line.substring(0, 100)}...`);
+        case "error":
+          throw new Error(`API Error: ${data.error}`);
+
+        default:
+          console.log(`Unknown event type: ${data.type}`);
+      }
+    } catch (parseError) {
+      console.warn(`Failed to parse line ${index + 1} (length: ${trimmedLine.length}): ${parseError.message}`);
+      console.warn(`Line content: ${trimmedLine.substring(0, 200)}...`);
+
+      // Try to find where the JSON might be malformed
+      if (trimmedLine.includes('{"type"')) {
+        const jsonStart = trimmedLine.indexOf('{"type"');
+        const potentialJson = trimmedLine.substring(jsonStart);
+        console.warn(`Potential JSON starts at position ${jsonStart}: ${potentialJson.substring(0, 100)}...`);
       }
     }
   });
+
+  console.log(`Successfully processed ${processedLines} JSON objects out of ${lines.length} lines`);
 
   return {
     commits: allCommits,
@@ -133,37 +152,30 @@ function fetchCommitsStream(config) {
 // For local testing (not needed in Google Apps Script)
 function simulateUrlFetchApp() {
   if (typeof UrlFetchApp === "undefined") {
-    // Use Node.js fetch for local testing
-    const { default: fetch } = require("node-fetch");
     global.UrlFetchApp = {
-      fetch: async function (url, options) {
-        const response = await fetch(url, options);
+      fetch: function (url, options) {
+        const fetch = require("node-fetch");
         return {
-          getResponseCode: () => response.status,
-          getContentText: () => response.text(),
+          getResponseCode: () => 200,
+          getContentText: () => {
+            // Simulate streaming response
+            return (
+              JSON.stringify({ type: "start", timestamp: new Date().toISOString() }) +
+              "\\n" +
+              JSON.stringify({ type: "progress", status: "Fetching commits..." }) +
+              "\\n" +
+              JSON.stringify({ type: "commits", commits: [{ hash: "abc123", author: "Test" }], progress: { processed: 1, total: 1 } }) +
+              "\\n" +
+              JSON.stringify({ type: "complete", success: true, totalCommits: 1, elapsedTime: "500ms" }) +
+              "\\n"
+            );
+          },
         };
       },
     };
   }
 }
 
-// Test runner for both local and Google Apps Script environments
-async function runTest() {
-  // Enable simulation for local testing
-  if (typeof process !== "undefined" && process.versions && process.versions.node) {
-    console.log("Running in Node.js environment - enabling fetch simulation");
-    simulateUrlFetchApp();
-  }
-  
-  try {
-    const result = await testGitDifferStreaming();
-    console.log("✅ Test completed successfully!");
-    return result;
-  } catch (error) {
-    console.error("❌ Test failed:", error.message);
-    throw error;
-  }
-}
-
 // Uncomment for local testing
-// runTest();
+// simulateUrlFetchApp();
+// testGitDifferStreaming();
