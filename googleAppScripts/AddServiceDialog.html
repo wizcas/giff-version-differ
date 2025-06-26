@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <base target="_top">
+  <link rel="stylesheet" href="https://ssl.gstatic.com/docs/script/css/add-ons1.css">
+  <style>
+    .dialog-container {
+      padding: 15px;
+    }
+
+    .form-group {
+      margin-bottom: 10px;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 5px;
+      font-weight: bold;
+    }
+
+    select,
+    button {
+      width: 100%;
+      padding: 8px;
+      margin-bottom: 10px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      box-sizing: border-box;
+      /* Include padding and border in the element's total width and height */
+    }
+
+    button {
+      background-color: #4CAF50;
+      color: black;
+      border: none;
+      cursor: pointer;
+    }
+
+    button:hover:not(:disabled) {
+      background-color: #45a049;
+    }
+
+    button:disabled {
+      background-color: #cccccc;
+      cursor: not-allowed;
+    }
+
+    .dialog-actions {
+      text-align: right;
+      margin-top: 20px;
+    }
+
+    .dialog-actions button {
+      width: auto;
+      margin-left: 10px;
+      padding: 0px 15px;
+    }
+
+    #loadingSpinner {
+      display: none;
+      /* Hidden by default */
+      border: 4px solid #f3f3f3;
+      /* Light grey */
+      border-top: 4px solid #3498db;
+      /* Blue */
+      border-radius: 50%;
+      width: 8px;
+      height: 8px;
+      animation: spin 2s linear infinite;
+      margin-left: 10px;
+      vertical-align: middle;
+    }
+
+    @keyframes spin {
+      0% {
+        transform: rotate(0deg);
+      }
+
+      100% {
+        transform: rotate(360deg);
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="dialog-container">
+    <div class="form-group">
+      <label for="productSelect">Product:</label>
+      <select id="productSelect" onchange="loadServices()">
+        <!-- Options will be loaded here -->
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label for="serviceSelect">Service:</label>
+      <select id="serviceSelect">
+        <!-- Options will be loaded here -->
+      </select>
+    </div>
+
+    <div class="dialog-actions">
+      <div id="loadingSpinner"></div>
+      <button id="closeButton" onclick="google.script.host.close()">Close</button>
+      <button id="submitButton" onclick="processSelection()">Submit</button>
+    </div>
+  </div>
+
+  <script>
+    const m = "<?= loadedMetadata ?>"
+    const productData = JSON.parse(m);
+    console.log("productData received in HTML:", productData, typeof productData);
+    const productSelect = document.getElementById('productSelect');
+    const serviceSelect = document.getElementById('serviceSelect');
+    const submitButton = document.getElementById('submitButton');
+    const closeButton = document.getElementById('closeButton');
+    const loadingSpinner = document.getElementById('loadingSpinner');
+
+    loadProducts();
+
+    // Load products into the product dropdown
+    function loadProducts() {
+      // Clear existing options
+      productSelect.innerHTML = '';
+      serviceSelect.innerHTML = ''; // Also clear services when products change
+
+      const products = Object.keys(productData).sort(); // Get sorted product names
+
+      // Add a default "Select Product" option
+      const defaultProductOption = document.createElement('option');
+      defaultProductOption.value = '';
+      defaultProductOption.textContent = 'Select a Product';
+      defaultProductOption.disabled = true;
+      defaultProductOption.selected = true;
+      productSelect.appendChild(defaultProductOption);
+
+      products.forEach(product => {
+        const option = document.createElement('option');
+        option.value = product;
+        option.textContent = product;
+        productSelect.appendChild(option);
+      });
+
+      // Initially load services for the first product if any, or disable service select
+      if (products.length > 0) {
+        // We'll rely on the defaultProductOption initially, so no auto-selection of first product
+        // and serviceSelect will be empty until a product is chosen.
+        serviceSelect.disabled = true; // Disable service select until a product is chosen
+      } else {
+        serviceSelect.disabled = true;
+      }
+    }
+
+    // Load services for the selected product into the service dropdown
+    function loadServices() {
+      serviceSelect.innerHTML = ''; // Clear existing options
+      const selectedProduct = productSelect.value;
+
+      if (!selectedProduct) {
+        serviceSelect.disabled = true;
+        return;
+      }
+
+      const services = productData[selectedProduct] || [];
+
+      // Add a default "Select Service" option
+      const defaultServiceOption = document.createElement('option');
+      defaultServiceOption.value = '';
+      defaultServiceOption.textContent = 'Select a Service';
+      defaultServiceOption.disabled = true;
+      defaultServiceOption.selected = true;
+      serviceSelect.appendChild(defaultServiceOption);
+
+      services.forEach(service => {
+        const option = document.createElement('option');
+        option.value = service;
+        option.textContent = service;
+        serviceSelect.appendChild(option);
+      });
+      serviceSelect.disabled = false; // Enable service select once a product is chosen
+    }
+
+    // Handle form submission
+    function processSelection() {
+      const selectedProduct = productSelect.value;
+      const selectedService = serviceSelect.value;
+
+      if (!selectedProduct || !selectedService) {
+        alert('Please select both a Product and a Service.');
+        return;
+      }
+
+      // Disable buttons and show loading spinner
+      submitButton.disabled = true;
+      closeButton.disabled = true;
+      loadingSpinner.style.display = 'inline-block';
+
+      google.script.run
+        .withSuccessHandler(onProcessSelectionSuccess)
+        .withFailureHandler(onProcessSelectionFailure)
+        .processSelection(selectedProduct, selectedService);
+    }
+
+    // Callback for successful processSelection
+    function onProcessSelectionSuccess(response) {
+      // Re-enable buttons and hide loading spinner
+      submitButton.disabled = false;
+      closeButton.disabled = false;
+      loadingSpinner.style.display = 'none';
+
+      if (response && response.status === 'success') {
+        // No alert needed for success. The user can just close the dialog.
+        console.log('Selection processed successfully.');
+      } else if (response && response.status === 'exists' && response.rowNumber) {
+        // Handle case where product/service already exists
+        console.log('Product/Service already exists at row:', response.rowNumber);
+        // Optionally, you can send a message back to the user via UI or just close
+        // alert(`Product/Service already exists at row ${response.rowNumber}.`);
+        google.script.host.close(); // Close the dialog after processing
+      } else {
+        console.warn('Unknown response from server:', response);
+        // Fallback for unexpected success response
+        // alert('Processing completed with unexpected result.');
+      }
+      google.script.host.close(); // Close the dialog after processing
+    }
+
+    // Callback for failed processSelection
+    function onProcessSelectionFailure(error) {
+      // Re-enable buttons and hide loading spinner
+      submitButton.disabled = false;
+      closeButton.disabled = false;
+      loadingSpinner.style.display = 'none';
+
+      console.error('Error processing selection:', error);
+      alert('Failed to process your selection. Please try again later.');
+    }
+
+  </script>
+</body>
+
+</html>
