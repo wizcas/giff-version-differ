@@ -48,6 +48,9 @@ function doGet(e) {
     return createHtmlResponse("Error: you must run this link on the row of a product service.");
   }
 
+  // Track start time for elapsed time calculation
+  const startTime = new Date();
+
   // // Use a LockService to prevent concurrent modifications on the same sheet.
   // // This is crucial for operations that modify the sheet structure.
   // const lock = LockService.getScriptLock();
@@ -144,7 +147,9 @@ function doGet(e) {
             Logger.log(`API Efficiency: ${apiStats.fetchStats.totalChecked} commits checked, ${apiStats.fetchStats.requestCount} requests`);
           }
         } catch (streamError) {
-          updateStatusDisplay(mainSheet, serviceName, "Streaming failed, trying regular API...");
+          const currentTime = new Date();
+          const elapsedTime = `${((currentTime - startTime) / 1000).toFixed(1)}s`;
+          updateStatusDisplay(mainSheet, serviceName, `Streaming failed after ${elapsedTime}, trying regular API...`);
           Logger.log(`Streaming API failed: ${streamError.message}`);
           Logger.log(`Falling back to regular API...`);
 
@@ -164,8 +169,10 @@ function doGet(e) {
           const responseBody = apiResponse.getContentText();
 
           if (responseCode !== 200) {
+            const currentTime = new Date();
+            const elapsedTime = `${((currentTime - startTime) / 1000).toFixed(1)}s`;
             const errorMessage = `Both Streaming and Regular API failed. Last error: Status ${responseCode}, Response: ${responseBody}`;
-            updateStatusDisplay(mainSheet, serviceName, `Error: API calls failed`);
+            updateStatusDisplay(mainSheet, serviceName, `❌ Error: API calls failed (after ${elapsedTime})`);
             Logger.log(errorMessage);
             return createHtmlResponse(errorMessage);
           }
@@ -194,8 +201,10 @@ function doGet(e) {
         const responseBody = apiResponse.getContentText();
 
         if (responseCode !== 200) {
+          const currentTime = new Date();
+          const elapsedTime = `${((currentTime - startTime) / 1000).toFixed(1)}s`;
           const errorMessage = `API Error: Status ${responseCode}, Response: ${responseBody}`;
-          updateStatusDisplay(mainSheet, serviceName, `Error: API call failed`);
+          updateStatusDisplay(mainSheet, serviceName, `❌ Error: API call failed (after ${elapsedTime})`);
           Logger.log(errorMessage);
           return createHtmlResponse(errorMessage);
         }
@@ -213,8 +222,10 @@ function doGet(e) {
     }
 
     if (!commits || !Array.isArray(commits)) {
+      const currentTime = new Date();
+      const elapsedTime = `${((currentTime - startTime) / 1000).toFixed(1)}s`;
       const errorMessage = `API Error: 'commits' field not found or not an array in API response.`;
-      updateStatusDisplay(mainSheet, serviceName, "Error: Invalid API response");
+      updateStatusDisplay(mainSheet, serviceName, `❌ Error: Invalid API response (after ${elapsedTime})`);
       Logger.log(errorMessage);
       return createHtmlResponse(errorMessage);
     }
@@ -251,6 +262,9 @@ function doGet(e) {
     if (apiStats.fetchStats && apiStats.fetchStats.requestCount) {
       successStatusMessage += ` (${apiStats.fetchStats.requestCount} API requests)`;
     }
+    if (apiStats.elapsedTime) {
+      successStatusMessage += ` in ${apiStats.elapsedTime}`;
+    }
     updateStatusDisplay(mainSheet, serviceName, successStatusMessage);
 
     // Build success message with API statistics
@@ -267,8 +281,10 @@ function doGet(e) {
     responseHtml = successMessage;
     Logger.log(responseHtml);
   } catch (error) {
+    const endTime = new Date();
+    const elapsedTime = `${((endTime - startTime) / 1000).toFixed(1)}s`;
     const errorMessage = `An unexpected error occurred: ${error.message}`;
-    updateStatusDisplay(mainSheet, serviceName, `❌ Error: ${error.message}`);
+    updateStatusDisplay(mainSheet, serviceName, `❌ Error: ${error.message} (after ${elapsedTime})`);
     Logger.log(errorMessage);
     return createHtmlResponse(errorMessage);
   } finally {
