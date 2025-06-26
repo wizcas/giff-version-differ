@@ -1,4 +1,4 @@
-import { getCommitsBetween } from "../../../lib/core.js";
+import { getCommitsBetween, streamCommitsBetween } from "../../../lib/core.js";
 import { NextResponse } from "next/server";
 
 /**
@@ -28,6 +28,7 @@ export async function GET(request) {
     const targetDir = searchParams.get("targetDir");
     const excludeSubPaths = searchParams.get("excludeSubPaths");
     const restOnly = searchParams.get("restOnly");
+    const stream = searchParams.get("stream"); // New parameter for streaming
 
     // Validate required parameters
     if (!repo) {
@@ -93,7 +94,12 @@ export async function GET(request) {
       restOnly: restOnly === "true" || restOnly === "1",
     };
 
-    // Get commits
+    // Handle streaming requests
+    if (stream === "true" || stream === "1") {
+      return handleStreamingRequest(options);
+    }
+
+    // Get commits (non-streaming, original behavior)
     const result = await getCommitsBetween(options);
 
     if (result.success) {
@@ -135,4 +141,91 @@ export async function GET(request) {
       }
     );
   }
+}
+
+/**
+ * Handle streaming requests that send data as it's processed
+ * This prevents Vercel timeout issues for large repositories
+ */
+async function handleStreamingRequest(options) {
+  const encoder = new TextEncoder();
+
+  const stream = new ReadableStream({
+    async start(controller) {
+      try {
+        // Send initial metadata
+        const startTime = Date.now();
+        const metadata = {
+          type: "metadata",
+          repoUrl: options.repoUrl,
+          from: options.from,
+          to: options.to,
+          targetDir: options.targetDir,
+          excludeSubPaths: options.excludeSubPaths,
+          startTime: new Date().toISOString(),
+        };
+
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify(metadata)}\n\n`));
+
+        // Stream commits as they're processed
+        const onCommitBatch = (commits, progress) => {
+          const chunk = {
+            type: "commits",
+            commits,
+            progress: {
+              processed: progress.processed,
+              total: progress.total,
+              percentage: Math.round((progress.processed / progress.total) * 100),
+            },
+          };
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(chunk)}\n\n`));
+        };
+
+        const onProgress = (status) => {
+          const chunk = {
+            type: "progress",
+            status,
+            timestamp: new Date().toISOString(),
+          };
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(chunk)}\n\n`));
+        };
+
+        // Process commits with streaming
+        const result = await streamCommitsBetween(options, onCommitBatch, onProgress);
+
+        // Send final result
+        const finalResult = {
+          type: "complete",
+          success: result.success,
+          totalCommits: result.totalCommits,
+          summary: result.summary,
+          elapsedTime: `${Date.now() - startTime}ms`,
+          error: result.error,
+        };
+
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify(finalResult)}\n\n`));
+        controller.close();
+      } catch (error) {
+        console.error(`[Streaming Error] ${options.repoUrl} - ${error.message}`);
+        const errorResult = {
+          type: "error",
+          success: false,
+          error: error.message,
+        };
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify(errorResult)}\n\n`));
+        controller.close();
+      }
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/plain; charset=utf-8",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    },
+  });
 }
