@@ -15,6 +15,10 @@ const API_TOKEN = "<TOKEN>";
 // <<< IMPORTANT: Do not end with a slash. Example: "https://github.com/microsoft/vscode"
 const REPO_BASE_URL = "<REPO_BASE_URL>";
 
+// Streaming API configuration
+const USE_STREAMING_API = true; // Set to false to use regular API
+const MAX_COMMITS_LIMIT = 1000; // Limit commits to prevent excessive API calls
+
 /**
  * Main function to handle GET requests from the Web App URL.
  * This function is triggered when a user clicks the hyperlink in the sheet.
@@ -88,8 +92,8 @@ function doGet(e) {
     const targetDir = metadata.targetDir;
     const excludeSubPaths = metadata.excludeSubPaths;
 
-    // 3. Build the API request URL and make the call
-    const apiUrl = buildApiUrl({
+    // 3. Build the streaming API request URL and make the call
+    const streamApiUrl = buildStreamApiUrl({
       repo,
       from: fromVersion,
       to: toVersion,
@@ -98,23 +102,80 @@ function doGet(e) {
       token: API_TOKEN,
     });
 
-    Logger.log(`Calling API: ${apiUrl}`);
+    Logger.log(`Calling Streaming API: ${streamApiUrl}`);
 
     let commits = [];
+    let apiStats = {};
+    let apiMethod = "unknown";
+
     if (!dryRun) {
-      const apiResponse = UrlFetchApp.fetch(apiUrl, { muteHttpExceptions: true });
-      const responseCode = apiResponse.getResponseCode();
-      const responseBody = apiResponse.getContentText();
+      if (USE_STREAMING_API) {
+        try {
+          // Try streaming API first
+          const streamResult = processStreamingApiResponse(streamApiUrl);
+          commits = streamResult.commits;
+          apiStats = streamResult.stats;
+          apiMethod = "streaming";
 
-      if (responseCode !== 200) {
-        const errorMessage = `API Error: Status ${responseCode}, Response: ${responseBody}`;
-        Logger.log(errorMessage);
-        return createHtmlResponse(errorMessage);
+          Logger.log(`Streaming API completed: ${commits.length} commits received`);
+          if (apiStats.fetchStats) {
+            Logger.log(`API Efficiency: ${apiStats.fetchStats.totalChecked} commits checked, ${apiStats.fetchStats.requestCount} requests`);
+          }
+        } catch (streamError) {
+          Logger.log(`Streaming API failed: ${streamError.message}`);
+          Logger.log(`Falling back to regular API...`);
+
+          // Fallback to regular API
+          const regularApiUrl = buildRegularApiUrl({
+            repo,
+            from: fromVersion,
+            to: toVersion,
+            targetDir,
+            excludeSubPaths,
+            token: API_TOKEN,
+          });
+
+          const apiResponse = UrlFetchApp.fetch(regularApiUrl, { muteHttpExceptions: true });
+          const responseCode = apiResponse.getResponseCode();
+          const responseBody = apiResponse.getContentText();
+
+          if (responseCode !== 200) {
+            const errorMessage = `Both Streaming and Regular API failed. Last error: Status ${responseCode}, Response: ${responseBody}`;
+            Logger.log(errorMessage);
+            return createHtmlResponse(errorMessage);
+          }
+
+          const data = JSON.parse(responseBody);
+          commits = data.commits;
+          apiMethod = "regular-fallback";
+        }
+      } else {
+        // Use regular API directly
+        const regularApiUrl = buildRegularApiUrl({
+          repo,
+          from: fromVersion,
+          to: toVersion,
+          targetDir,
+          excludeSubPaths,
+          token: API_TOKEN,
+        });
+
+        Logger.log(`Calling Regular API: ${regularApiUrl}`);
+
+        const apiResponse = UrlFetchApp.fetch(regularApiUrl, { muteHttpExceptions: true });
+        const responseCode = apiResponse.getResponseCode();
+        const responseBody = apiResponse.getContentText();
+
+        if (responseCode !== 200) {
+          const errorMessage = `API Error: Status ${responseCode}, Response: ${responseBody}`;
+          Logger.log(errorMessage);
+          return createHtmlResponse(errorMessage);
+        }
+
+        const data = JSON.parse(responseBody);
+        commits = data.commits;
+        apiMethod = "regular";
       }
-
-      // 4. Parse the JSON response for commit history
-      const data = JSON.parse(responseBody);
-      commits = data.commits;
     }
 
     if (!commits || !Array.isArray(commits)) {
@@ -126,7 +187,18 @@ function doGet(e) {
     // 5. Delete existing commits and insert the newly fetched ones
     insertCommitsIntoSheet(mainSheet, targetRow, commits);
 
-    responseHtml = `Successfully processed row ${targetRow} and inserted ${commits.length} commits.`;
+    // Build success message with API statistics
+    let successMessage = `Successfully processed row ${targetRow} and inserted ${commits.length} commits using ${apiMethod} API.`;
+    if (apiStats.fetchStats) {
+      successMessage += ` API efficiency: ${apiStats.fetchStats.totalChecked || "N/A"} commits checked in ${
+        apiStats.fetchStats.requestCount || "N/A"
+      } requests.`;
+    }
+    if (apiStats.elapsedTime) {
+      successMessage += ` Total time: ${apiStats.elapsedTime}.`;
+    }
+
+    responseHtml = successMessage;
     Logger.log(responseHtml);
   } catch (error) {
     const errorMessage = `An unexpected error occurred: ${error.message}`;
@@ -212,17 +284,130 @@ function getMetadataForService(serviceName) {
 }
 
 /**
- * Builds the API URL with provided parameters.
- * @param {Object} params An object containing repo, from, to, targetDir, excludeSubPaths, token.
- * @returns {string} The constructed API URL.
+ * Processes the streaming API response and collects all commits.
+ * @param {string} streamApiUrl The streaming API URL to call.
+ * @returns {Object} An object containing commits array and stats.
  */
-function buildApiUrl(params) {
+function processStreamingApiResponse(streamApiUrl) {
+  try {
+    // Make the streaming API call with extended timeout
+    const response = UrlFetchApp.fetch(streamApiUrl, {
+      muteHttpExceptions: true,
+      headers: {
+        Accept: "application/x-ndjson",
+        "Cache-Control": "no-cache",
+      },
+      // Note: Google Apps Script has a maximum execution time limit
+      // The streaming API should complete faster than this limit
+    });
+
+    const responseCode = response.getResponseCode();
+    if (responseCode !== 200) {
+      const errorBody = response.getContentText();
+      throw new Error(`Streaming API HTTP Error: Status ${responseCode}, Response: ${errorBody.substring(0, 500)}...`);
+    }
+
+    const responseBody = response.getContentText();
+
+    if (!responseBody || responseBody.trim() === "") {
+      throw new Error("Streaming API returned empty response");
+    }
+
+    const lines = responseBody.split("\n").filter((line) => line.trim());
+    Logger.log(`Processing ${lines.length} lines from streaming response...`);
+
+    let allCommits = [];
+    let finalStats = {};
+    let hasError = false;
+    let errorMessage = "";
+    let progressCount = 0;
+
+    // Process each JSON line from the streaming response
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      try {
+        const data = JSON.parse(line);
+
+        switch (data.type) {
+          case "start":
+            Logger.log(`Streaming started for ${data.repoUrl} (${data.from} → ${data.to})`);
+            break;
+
+          case "progress":
+            progressCount++;
+            if (progressCount % 5 === 0) {
+              // Log every 5th progress update to avoid spam
+              Logger.log(`Progress: ${data.status}`);
+            }
+            break;
+
+          case "commits":
+            // Accumulate commits from batches
+            if (data.commits && Array.isArray(data.commits)) {
+              allCommits = allCommits.concat(data.commits);
+              Logger.log(`Received batch: ${data.commits.length} commits (total: ${allCommits.length})`);
+            }
+            break;
+
+          case "complete":
+            Logger.log(`Streaming completed: ${data.totalCommits} total commits`);
+            finalStats = {
+              totalCommits: data.totalCommits,
+              elapsedTime: data.elapsedTime,
+              fetchStats: data.fetchStats,
+              apiUsed: data.apiUsed,
+              repository: data.repository,
+            };
+            break;
+
+          case "error":
+            hasError = true;
+            errorMessage = data.error;
+            Logger.log(`Streaming error: ${errorMessage}`);
+            break;
+
+          default:
+            if (i < 10) {
+              // Only log first few unknown types to avoid spam
+              Logger.log(`Unknown streaming event type: ${data.type}`);
+            }
+        }
+      } catch (parseError) {
+        Logger.log(`Failed to parse streaming response line ${i + 1}: ${parseError.message}`);
+        Logger.log(`Problematic line: ${line.substring(0, 200)}...`);
+        // Continue processing other lines
+      }
+    }
+
+    if (hasError) {
+      throw new Error(`Streaming API Error: ${errorMessage}`);
+    }
+
+    if (allCommits.length === 0 && !hasError) {
+      Logger.log("Warning: No commits received from streaming API");
+    }
+
+    Logger.log(`Successfully processed streaming response: ${allCommits.length} commits`);
+
+    return {
+      commits: allCommits,
+      stats: finalStats,
+    };
+  } catch (error) {
+    Logger.log(`Error processing streaming API: ${error.message}`);
+    Logger.log(`Stack trace: ${error.stack}`);
+    throw error;
+  }
+}
+
+/**
+ * Builds the streaming API URL with provided parameters.
+ * @param {Object} params An object containing repo, from, to, targetDir, excludeSubPaths, token.
+ * @returns {string} The constructed streaming API URL.
+ */
+function buildStreamApiUrl(params) {
   const queryParts = [];
-  // Iterate over the properties of the params object
-  // and encode each key-value pair for URL safety.
-  // We explicitly list the parameters we expect to ensure clarity
-  // and prevent accidental inclusion of unwanted properties.
-  // Note: Using encodeURIComponent for individual parts is crucial for URL safety.
+  // Build URL for streaming API endpoint
   if (params.repo) {
     queryParts.push(`repo=${encodeURIComponent(params.repo)}`);
   }
@@ -236,17 +421,44 @@ function buildApiUrl(params) {
     queryParts.push(`targetDir=${encodeURIComponent(params.targetDir)}`);
   }
   if (params.excludeSubPaths) {
-    // excludeSubPaths can be an array, if so, it needs to be joined correctly
-    // If it's a string, it will be encoded directly.
-    // Assuming it's a comma-separated string for simplicity based on typical API designs.
-    // If your API expects multiple 'excludeSubPaths' parameters, you'd iterate here.
     queryParts.push(`excludeSubPaths=${encodeURIComponent(params.excludeSubPaths)}`);
   }
   if (params.token) {
-    // Add token here as per your request
     queryParts.push(`token=${encodeURIComponent(params.token)}`);
   }
-  // Join all parts with '&' and prepend with '?'
+  // Set maxCommits to prevent excessive API calls
+  queryParts.push(`maxCommits=${MAX_COMMITS_LIMIT}`);
+
+  const queryString = queryParts.join("&");
+  return `${API_BASE_URL}/stream?${queryString}`;
+}
+
+/**
+ * Builds the regular (non-streaming) API URL with provided parameters.
+ * @param {Object} params An object containing repo, from, to, targetDir, excludeSubPaths, token.
+ * @returns {string} The constructed regular API URL.
+ */
+function buildRegularApiUrl(params) {
+  const queryParts = [];
+  if (params.repo) {
+    queryParts.push(`repo=${encodeURIComponent(params.repo)}`);
+  }
+  if (params.from) {
+    queryParts.push(`from=${encodeURIComponent(params.from)}`);
+  }
+  if (params.to) {
+    queryParts.push(`to=${encodeURIComponent(params.to)}`);
+  }
+  if (params.targetDir) {
+    queryParts.push(`targetDir=${encodeURIComponent(params.targetDir)}`);
+  }
+  if (params.excludeSubPaths) {
+    queryParts.push(`excludeSubPaths=${encodeURIComponent(params.excludeSubPaths)}`);
+  }
+  if (params.token) {
+    queryParts.push(`token=${encodeURIComponent(params.token)}`);
+  }
+
   const queryString = queryParts.join("&");
   return `${API_BASE_URL}?${queryString}`;
 }
