@@ -171,6 +171,8 @@ export default function Home() {
                 setStreamSummary({
                   totalCommits: data.totalCommits,
                   elapsedTime: data.elapsedTime,
+                  fetchStats: data.fetchStats, // Add fetch statistics
+                  apiUsed: data.apiUsed,
                   success: true,
                 });
                 // Convert to old result format for compatibility
@@ -179,6 +181,8 @@ export default function Home() {
                   commits: allCommits,
                   totalCommits: data.totalCommits,
                   elapsedTime: data.elapsedTime,
+                  fetchStats: data.fetchStats,
+                  apiUsed: data.apiUsed,
                   repository: data.repository,
                   fromRef: data.fromRef,
                   toRef: data.toRef,
@@ -465,7 +469,7 @@ export default function Home() {
                   <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
                 </div>
               )}
-              <span className={loading ? "opacity-0" : "opacity-100"}>{loading ? "Analyzing Commits..." : "� Stream Analysis"}</span>
+              <span className={loading ? "opacity-0" : "opacity-100"}>{loading ? "Analyzing Commits..." : "🚉 Stream Analysis"}</span>
             </button>{" "}
           </form>
         </div>
@@ -724,6 +728,50 @@ export default function Home() {
                   <div className="text-lg font-semibold text-slate-900 dark:text-slate-100">{result.elapsedTime}</div>
                 </div>
               </div>
+
+              {/* Fetch Statistics - Show only for GraphQL API with fetch stats */}
+              {result.fetchStats && result.fetchStats.totalChecked > 0 && (
+                <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-xl border border-blue-200 dark:border-blue-800 mb-6">
+                  <div className="flex items-center mb-3">
+                    <svg className="w-5 h-5 text-blue-600 dark:text-blue-400 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
+                      />
+                    </svg>
+                    <h4 className="text-sm font-semibold text-blue-800 dark:text-blue-300">API Efficiency</h4>
+                  </div>
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
+                    <div>
+                      <div className="text-blue-600 dark:text-blue-400 font-medium">Commits Checked</div>
+                      <div className="text-slate-900 dark:text-slate-100 font-semibold">{result.fetchStats.totalChecked || "N/A"}</div>
+                    </div>
+                    <div>
+                      <div className="text-blue-600 dark:text-blue-400 font-medium">API Requests</div>
+                      <div className="text-slate-900 dark:text-slate-100 font-semibold">{result.fetchStats.requestCount || "N/A"}</div>
+                    </div>
+                    <div>
+                      <div className="text-blue-600 dark:text-blue-400 font-medium">Fetch Time</div>
+                      <div className="text-slate-900 dark:text-slate-100 font-semibold">{result.fetchStats.fetchTime || "N/A"}</div>
+                    </div>
+                  </div>
+                  {result.fetchStats.totalChecked && result.totalCommits && (
+                    <div className="mt-3 pt-3 border-t border-blue-200 dark:border-blue-700">
+                      <div className="text-xs text-blue-700 dark:text-blue-300">
+                        Efficiency: {result.totalCommits} returned / {result.fetchStats.totalChecked} checked ={" "}
+                        {Math.round((result.totalCommits / result.fetchStats.totalChecked) * 100)}% efficiency
+                        {result.fetchStats.totalChecked > result.totalCommits * 2 && (
+                          <span className="text-amber-600 dark:text-amber-400 ml-2">
+                            ⚠️ Consider using smaller date ranges for better performance
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Commits List */}
               {result.commits && result.commits.length > 0 && (
@@ -1029,16 +1077,16 @@ export default function Home() {
                     {`function getGitCommits() {
   const url = 'https://your-domain.vercel.app/api/git-diff/stream';
   const params = '?repo=https://github.com/owner/repo&from=v1.0.0&to=v2.0.0';
-  
+
   const response = UrlFetchApp.fetch(url + params);
   const lines = response.getContentText().split('\\n');
-  
+
   let allCommits = [];
-  
+
   lines.forEach(line => {
     if (line.trim()) {
       const data = JSON.parse(line);
-      
+
       if (data.type === 'commits') {
         allCommits = allCommits.concat(data.commits);
         Logger.log(\`Progress: \${data.progress.processed}/\${data.progress.total}\`);
@@ -1047,7 +1095,7 @@ export default function Home() {
       }
     }
   });
-  
+
   return allCommits;
 }`}
                   </div>

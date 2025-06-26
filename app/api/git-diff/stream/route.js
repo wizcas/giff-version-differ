@@ -57,8 +57,35 @@ export async function GET(request) {
     };
 
     const encoder = new TextEncoder();
+    let isCancelled = false;
+
     const stream = new ReadableStream({
       async start(controller) {
+        let isControllerClosed = false;
+
+        const safeEnqueue = (data) => {
+          try {
+            if (!isControllerClosed && !isCancelled) {
+              controller.enqueue(encoder.encode(JSON.stringify(data) + "\n"));
+            }
+          } catch (error) {
+            console.error("[Stream] Failed to enqueue data:", error.message);
+            isControllerClosed = true;
+          }
+        };
+
+        const safeClose = () => {
+          try {
+            if (!isControllerClosed && !isCancelled) {
+              controller.close();
+              isControllerClosed = true;
+            }
+          } catch (error) {
+            console.error("[Stream] Failed to close controller:", error.message);
+            isControllerClosed = true;
+          }
+        };
+
         try {
           const startTime = Date.now();
 
@@ -72,54 +99,76 @@ export async function GET(request) {
             excludeSubPaths: options.excludeSubPaths,
             timestamp: new Date().toISOString(),
           };
-          controller.enqueue(encoder.encode(JSON.stringify(metadata) + "\n"));
+          safeEnqueue(metadata);
 
           // Stream commits
           const onCommitBatch = (commits, progress) => {
+            if (isControllerClosed || isCancelled) return;
             const chunk = {
               type: "commits",
               commits,
               progress,
               timestamp: new Date().toISOString(),
             };
-            controller.enqueue(encoder.encode(JSON.stringify(chunk) + "\n"));
+            safeEnqueue(chunk);
           };
 
           const onProgress = (status) => {
+            if (isControllerClosed || isCancelled) return;
             const chunk = {
               type: "progress",
               status,
               timestamp: new Date().toISOString(),
             };
-            controller.enqueue(encoder.encode(JSON.stringify(chunk) + "\n"));
+            safeEnqueue(chunk);
           };
 
           // Process commits
           const result = await streamCommitsBetween(options, onCommitBatch, onProgress);
 
-          // Send completion
-          const completion = {
-            type: "complete",
-            success: result.success,
-            totalCommits: result.totalCommits,
-            summary: result.summary,
-            elapsedTime: `${Date.now() - startTime}ms`,
-            error: result.error,
-            timestamp: new Date().toISOString(),
-          };
-          controller.enqueue(encoder.encode(JSON.stringify(completion) + "\n"));
+          // Send completion only if controller is still open
+          if (!isControllerClosed && !isCancelled) {
+            const completion = {
+              type: "complete",
+              success: result.success,
+              totalCommits: result.totalCommits,
+              summary: result.summary,
+              fetchStats: result.fetchStats, // Add fetch statistics
+              elapsedTime: `${Date.now() - startTime}ms`,
+              error: result.error,
+              repository: result.repository,
+              fromRef: result.fromRef,
+              toRef: result.toRef,
+              fromSha: result.fromSha,
+              toSha: result.toSha,
+              apiUsed: result.apiUsed,
+              timestamp: new Date().toISOString(),
+            };
+            safeEnqueue(completion);
+          }
 
-          controller.close();
+          safeClose();
         } catch (error) {
-          const errorChunk = {
-            type: "error",
-            success: false,
-            error: error.message,
-            timestamp: new Date().toISOString(),
-          };
-          controller.enqueue(encoder.encode(JSON.stringify(errorChunk) + "\n"));
-          controller.close();
+          console.error(`[Stream Error] ${options.repoUrl} ${options.from}..${options.to} - ${error.message}`, error);
+
+          if (!isControllerClosed && !isCancelled) {
+            const errorChunk = {
+              type: "error",
+              success: false,
+              error: error.message,
+              timestamp: new Date().toISOString(),
+            };
+            safeEnqueue(errorChunk);
+          }
+
+          safeClose();
         }
+      },
+
+      cancel() {
+        // Handle client disconnect
+        console.log("[Stream] Client disconnected");
+        isCancelled = true;
       },
     });
 
