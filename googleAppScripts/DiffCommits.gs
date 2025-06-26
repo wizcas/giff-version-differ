@@ -184,11 +184,29 @@ function doGet(e) {
       return createHtmlResponse(errorMessage);
     }
 
-    // 5. Delete existing commits and insert the newly fetched ones
-    insertCommitsIntoSheet(mainSheet, targetRow, commits);
+    // 5. Re-find the target row using serviceName (sheet may have changed during API call)
+    Logger.log(`Re-finding target row for service: "${serviceName}"`);
+    const updatedTargetRow = findTargetRowByServiceName(mainSheet, serviceName);
+
+    if (!updatedTargetRow) {
+      const errorMessage = `Error: Service "${serviceName}" not found in sheet after API call. The sheet may have been modified during processing.`;
+      Logger.log(errorMessage);
+      return createHtmlResponse(errorMessage);
+    }
+
+    if (updatedTargetRow !== targetRow) {
+      Logger.log(
+        `⚠️ Target row changed during API call: original=${targetRow}, updated=${updatedTargetRow}. Sheet was likely modified during processing.`
+      );
+    } else {
+      Logger.log(`✅ Target row remains stable: ${targetRow}`);
+    }
+
+    // Delete existing commits and insert the newly fetched ones using updated row
+    insertCommitsIntoSheet(mainSheet, updatedTargetRow, commits);
 
     // Build success message with API statistics
-    let successMessage = `Successfully processed row ${targetRow} and inserted ${commits.length} commits using ${apiMethod} API.`;
+    let successMessage = `Successfully processed row ${updatedTargetRow} (originally ${targetRow}) and inserted ${commits.length} commits using ${apiMethod} API.`;
     if (apiStats.fetchStats) {
       successMessage += ` API efficiency: ${apiStats.fetchStats.totalChecked || "N/A"} commits checked in ${
         apiStats.fetchStats.requestCount || "N/A"
@@ -546,6 +564,49 @@ function setApiToken() {
  */
 function getApiToken() {
   return PropertiesService.getUserProperties().getProperty("GIT_DIFF_API_TOKEN");
+}
+
+/**
+ * Finds the target row for a service by searching for the serviceName in column A.
+ * The serviceName should match the ending part of the cell value (after a newline if present).
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet The sheet to search in.
+ * @param {string} serviceName The service name to search for.
+ * @returns {number|null} The row number if found, null if not found.
+ */
+function findTargetRowByServiceName(sheet, serviceName) {
+  const lastRow = sheet.getLastRow();
+
+  if (lastRow < 2) {
+    // No data rows to search
+    return null;
+  }
+
+  // Get all values in column A (excluding header row)
+  const columnAValues = sheet.getRange(2, 1, lastRow - 1, 1).getDisplayValues();
+
+  for (let i = 0; i < columnAValues.length; i++) {
+    const cellValue = columnAValues[i][0];
+
+    if (cellValue) {
+      const cellContent = String(cellValue);
+      const lines = cellContent.split("\n");
+
+      // Extract service name (same logic as in the main function)
+      let extractedServiceName = "";
+      if (lines.length > 1) {
+        extractedServiceName = lines[1].trim(); // Get the second line and trim whitespace
+      } else {
+        extractedServiceName = lines[0].trim(); // If only one line, take that one
+      }
+
+      // Check if this matches our target service name
+      if (extractedServiceName === serviceName) {
+        return i + 2; // Convert back to 1-based row number (i is 0-based, +2 to account for header row)
+      }
+    }
+  }
+
+  return null; // Service not found
 }
 
 function test() {
