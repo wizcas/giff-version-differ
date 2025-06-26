@@ -76,14 +76,22 @@ function doGet(e) {
 
     if (missingColumns.length > 0) {
       const errorMessage = `Error: Missing data in row ${targetRow} for columns: ${missingColumns.join(", ")}.`;
+      // Try to update status display even with missing data, using what we have
+      if (serviceName) {
+        updateStatusDisplay(mainSheet, serviceName, `❌ Missing data: ${missingColumns.join(", ")}`);
+      }
       Logger.log(errorMessage);
       return createHtmlResponse(errorMessage);
     }
+
+    // Show validation success
+    updateStatusDisplay(mainSheet, serviceName, "Validating metadata...");
 
     // 2. From Metadata sheet, retrieve predefined settings: repo, targetDir, excludeSubPaths
     const metadata = getMetadataForService(serviceName);
     if (!metadata) {
       const errorMessage = `Error: No metadata found for service "${serviceName}" in the "${METADATA_SHEET_NAME}" sheet.`;
+      updateStatusDisplay(mainSheet, serviceName, `❌ No metadata found for service`);
       Logger.log(errorMessage);
       return createHtmlResponse(errorMessage);
     }
@@ -104,6 +112,9 @@ function doGet(e) {
 
     Logger.log(`Calling Streaming API: ${streamApiUrl}`);
 
+    // Show initial status to user
+    updateStatusDisplay(mainSheet, serviceName, "Pulling...It may take 1-2 minutes. Please wait.");
+
     let commits = [];
     let apiStats = {};
     let apiMethod = "unknown";
@@ -111,21 +122,27 @@ function doGet(e) {
     if (!dryRun) {
       if (USE_STREAMING_API) {
         try {
+          // Update status for streaming API
+          updateStatusDisplay(mainSheet, serviceName, "Using streaming API for faster processing...");
+
           // Try streaming API first
-          const streamResult = processStreamingApiResponse(streamApiUrl);
+          const streamResult = processStreamingApiResponse(streamApiUrl, mainSheet, serviceName);
           commits = streamResult.commits;
           apiStats = streamResult.stats;
           apiMethod = "streaming";
 
+          updateStatusDisplay(mainSheet, serviceName, `Streaming completed: ${commits.length} commits received`);
           Logger.log(`Streaming API completed: ${commits.length} commits received`);
           if (apiStats.fetchStats) {
             Logger.log(`API Efficiency: ${apiStats.fetchStats.totalChecked} commits checked, ${apiStats.fetchStats.requestCount} requests`);
           }
         } catch (streamError) {
+          updateStatusDisplay(mainSheet, serviceName, "Streaming failed, trying regular API...");
           Logger.log(`Streaming API failed: ${streamError.message}`);
           Logger.log(`Falling back to regular API...`);
 
           // Fallback to regular API
+          updateStatusDisplay(mainSheet, serviceName, "Calling regular API...");
           const regularApiUrl = buildRegularApiUrl({
             repo,
             from: fromVersion,
@@ -141,16 +158,19 @@ function doGet(e) {
 
           if (responseCode !== 200) {
             const errorMessage = `Both Streaming and Regular API failed. Last error: Status ${responseCode}, Response: ${responseBody}`;
+            updateStatusDisplay(mainSheet, serviceName, `Error: API calls failed`);
             Logger.log(errorMessage);
             return createHtmlResponse(errorMessage);
           }
 
+          updateStatusDisplay(mainSheet, serviceName, "Regular API completed, processing results...");
           const data = JSON.parse(responseBody);
           commits = data.commits;
           apiMethod = "regular-fallback";
         }
       } else {
         // Use regular API directly
+        updateStatusDisplay(mainSheet, serviceName, "Using regular API...");
         const regularApiUrl = buildRegularApiUrl({
           repo,
           from: fromVersion,
@@ -168,23 +188,37 @@ function doGet(e) {
 
         if (responseCode !== 200) {
           const errorMessage = `API Error: Status ${responseCode}, Response: ${responseBody}`;
+          updateStatusDisplay(mainSheet, serviceName, `Error: API call failed`);
           Logger.log(errorMessage);
           return createHtmlResponse(errorMessage);
         }
 
+        updateStatusDisplay(mainSheet, serviceName, "Regular API completed, processing results...");
         const data = JSON.parse(responseBody);
         commits = data.commits;
         apiMethod = "regular";
       }
+    } else {
+      // Dry run mode - no actual API call
+      updateStatusDisplay(mainSheet, serviceName, "✅ Dry run completed - no API call made");
+      commits = []; // Empty commits array for dry run
+      apiMethod = "dry-run";
     }
 
     if (!commits || !Array.isArray(commits)) {
       const errorMessage = `API Error: 'commits' field not found or not an array in API response.`;
+      updateStatusDisplay(mainSheet, serviceName, "Error: Invalid API response");
       Logger.log(errorMessage);
       return createHtmlResponse(errorMessage);
     }
 
+    // Handle dry run or empty results
+    if (commits.length === 0 && !dryRun) {
+      updateStatusDisplay(mainSheet, serviceName, "✅ No commits found in range");
+    }
+
     // 5. Re-find the target row using serviceName (sheet may have changed during API call)
+    updateStatusDisplay(mainSheet, serviceName, "Processing commits and updating sheet...");
     Logger.log(`Re-finding target row for service: "${serviceName}"`);
     const updatedTargetRow = findTargetRowByServiceName(mainSheet, serviceName);
 
@@ -205,6 +239,13 @@ function doGet(e) {
     // Delete existing commits and insert the newly fetched ones using updated row
     insertCommitsIntoSheet(mainSheet, updatedTargetRow, commits);
 
+    // Update final success status
+    let successStatusMessage = `✅ Completed: ${commits.length} commits inserted`;
+    if (apiStats.fetchStats && apiStats.fetchStats.requestCount) {
+      successStatusMessage += ` (${apiStats.fetchStats.requestCount} API requests)`;
+    }
+    updateStatusDisplay(mainSheet, serviceName, successStatusMessage);
+
     // Build success message with API statistics
     let successMessage = `Successfully processed row ${updatedTargetRow} (originally ${targetRow}) and inserted ${commits.length} commits using ${apiMethod} API.`;
     if (apiStats.fetchStats) {
@@ -220,6 +261,7 @@ function doGet(e) {
     Logger.log(responseHtml);
   } catch (error) {
     const errorMessage = `An unexpected error occurred: ${error.message}`;
+    updateStatusDisplay(mainSheet, serviceName, `❌ Error: ${error.message}`);
     Logger.log(errorMessage);
     return createHtmlResponse(errorMessage);
   } finally {
@@ -304,9 +346,11 @@ function getMetadataForService(serviceName) {
 /**
  * Processes the streaming API response and collects all commits.
  * @param {string} streamApiUrl The streaming API URL to call.
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet The sheet to update status in.
+ * @param {string} serviceName The service name for status updates.
  * @returns {Object} An object containing commits array and stats.
  */
-function processStreamingApiResponse(streamApiUrl) {
+function processStreamingApiResponse(streamApiUrl, sheet, serviceName) {
   try {
     // Make the streaming API call with extended timeout
     const response = UrlFetchApp.fetch(streamApiUrl, {
@@ -348,11 +392,16 @@ function processStreamingApiResponse(streamApiUrl) {
 
         switch (data.type) {
           case "start":
+            updateStatusDisplay(sheet, serviceName, `Starting: ${data.repoUrl} (${data.from} → ${data.to})`);
             Logger.log(`Streaming started for ${data.repoUrl} (${data.from} → ${data.to})`);
             break;
 
           case "progress":
             progressCount++;
+            // Update status display with progress (but not too frequently)
+            if (progressCount % 3 === 0) {
+              updateStatusDisplay(sheet, serviceName, `Progress: ${data.status}`);
+            }
             if (progressCount % 5 === 0) {
               // Log every 5th progress update to avoid spam
               Logger.log(`Progress: ${data.status}`);
@@ -363,11 +412,13 @@ function processStreamingApiResponse(streamApiUrl) {
             // Accumulate commits from batches
             if (data.commits && Array.isArray(data.commits)) {
               allCommits = allCommits.concat(data.commits);
+              updateStatusDisplay(sheet, serviceName, `Received: ${allCommits.length} commits so far...`);
               Logger.log(`Received batch: ${data.commits.length} commits (total: ${allCommits.length})`);
             }
             break;
 
           case "complete":
+            updateStatusDisplay(sheet, serviceName, `Stream completed: ${data.totalCommits} commits`);
             Logger.log(`Streaming completed: ${data.totalCommits} total commits`);
             finalStats = {
               totalCommits: data.totalCommits,
@@ -381,6 +432,7 @@ function processStreamingApiResponse(streamApiUrl) {
           case "error":
             hasError = true;
             errorMessage = data.error;
+            updateStatusDisplay(sheet, serviceName, `Streaming error: ${errorMessage}`);
             Logger.log(`Streaming error: ${errorMessage}`);
             break;
 
@@ -607,6 +659,32 @@ function findTargetRowByServiceName(sheet, serviceName) {
   }
 
   return null; // Service not found
+}
+
+/**
+ * Updates the status display in column E of the target row.
+ * Always finds the row by service name to handle sheet changes.
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet The sheet to update.
+ * @param {string} serviceName The service name to find.
+ * @param {string} status The status message to display.
+ */
+function updateStatusDisplay(sheet, serviceName, status) {
+  try {
+    const targetRow = findTargetRowByServiceName(sheet, serviceName);
+
+    if (!targetRow) {
+      Logger.log(`Warning: Could not find service "${serviceName}" to update status display`);
+      return;
+    }
+
+    // Update column E (5th column) with the status
+    sheet.getRange(targetRow, 5).setValue(status);
+    SpreadsheetApp.flush(); // Ensure immediate update
+
+    Logger.log(`Status updated for ${serviceName} (row ${targetRow}): ${status}`);
+  } catch (error) {
+    Logger.log(`Error updating status display: ${error.message}`);
+  }
 }
 
 function test() {
