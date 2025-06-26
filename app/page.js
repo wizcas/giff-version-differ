@@ -13,6 +13,9 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [urlCopied, setUrlCopied] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importUrl, setImportUrl] = useState("");
+  const [importError, setImportError] = useState("");
 
   // Generate dynamic API URL for documentation
   const generateApiUrl = () => {
@@ -44,7 +47,6 @@ export default function Home() {
   const isPlaceholder = (value, placeholder) => {
     return !value || value === placeholder;
   };
-
   // Copy URL to clipboard
   const copyUrlToClipboard = async () => {
     const fullUrl =
@@ -55,6 +57,38 @@ export default function Home() {
       setTimeout(() => setUrlCopied(false), 2000);
     } catch (err) {
       console.error("Failed to copy URL:", err);
+    }
+  };
+
+  // Import URL and fill form
+  const handleImportUrl = () => {
+    setImportError("");
+    try {
+      let urlToParse = importUrl.trim();
+
+      // Handle both full URLs and just the query string
+      if (urlToParse.includes("?")) {
+        // Extract just the query part
+        const urlObj = new URL(urlToParse.startsWith("http") ? urlToParse : `http://localhost:3000${urlToParse}`);
+        const params = urlObj.searchParams;
+
+        // Fill in the form fields
+        if (params.get("repo")) setRepo(decodeURIComponent(params.get("repo")));
+        if (params.get("from")) setFromRef(decodeURIComponent(params.get("from")));
+        if (params.get("to")) setToRef(decodeURIComponent(params.get("to")));
+        if (params.get("targetDir")) setTargetDir(decodeURIComponent(params.get("targetDir")));
+        if (params.get("excludeSubPaths")) setExcludeSubPaths(decodeURIComponent(params.get("excludeSubPaths")));
+        if (params.get("token")) setToken(decodeURIComponent(params.get("token")));
+
+        // Close modal and clear import fields
+        setShowImportModal(false);
+        setImportUrl("");
+        setImportError("");
+      } else {
+        setImportError("Invalid URL format. Please paste a complete URL with parameters.");
+      }
+    } catch (err) {
+      setImportError("Failed to parse URL. Please check the format and try again.");
     }
   };
 
@@ -120,11 +154,33 @@ export default function Home() {
       <main className="container mx-auto px-4 py-8 max-w-4xl">
         {/* Main Form Card */}
         <div className="animate-fade-in-up bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm rounded-2xl shadow-xl p-8 mb-8 border border-white/20 mx-auto max-w-4xl">
+          {" "}
           <div className="text-center mb-8">
-            <h2 className="text-2xl font-bold text-slate-800 dark:text-slate-200 mb-2">Analyze Git Commits</h2>
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex-1"></div>
+              <div className="flex-1 text-center">
+                <h2 className="text-2xl font-bold text-slate-800 dark:text-slate-200">Analyze Git Commits</h2>
+              </div>
+              <div className="flex-1 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => setShowImportModal(true)}
+                  className="inline-flex items-center px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300 text-sm font-medium rounded-lg transition-colors duration-200"
+                >
+                  <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 19l3 3m0 0l3-3m-3 3V10"
+                    />
+                  </svg>
+                  Import URL
+                </button>
+              </div>
+            </div>
             <p className="text-slate-600 dark:text-slate-400">Compare commits between two Git references</p>
           </div>
-
           <form onSubmit={handleSubmit} className="space-y-8">
             <div className="space-y-3">
               <label htmlFor="repo" className="block text-sm font-semibold text-slate-700 dark:text-slate-300">
@@ -152,7 +208,6 @@ export default function Home() {
                 />
               </div>
             </div>
-
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
               <div className="space-y-3">
                 <label htmlFor="from" className="block text-sm font-semibold text-slate-700 dark:text-slate-300">
@@ -208,7 +263,6 @@ export default function Home() {
                 </div>
               </div>
             </div>
-
             {/* Optional Fields */}
             <div className="space-y-6">
               <div className="border-t border-slate-200 dark:border-slate-700 pt-6">
@@ -312,7 +366,6 @@ export default function Home() {
                 </div>
               </div>
             </div>
-
             <button
               type="submit"
               disabled={loading}
@@ -324,9 +377,92 @@ export default function Home() {
                 </div>
               )}
               <span className={loading ? "opacity-0" : "opacity-100"}>{loading ? "Analyzing Commits..." : "🔍 Analyze Commits"}</span>
-            </button>
+            </button>{" "}
           </form>
         </div>
+
+        {/* Import URL Modal */}
+        {showImportModal && (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+            <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+              <div className="p-6 border-b border-slate-200 dark:border-slate-700">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xl font-bold text-slate-800 dark:text-slate-200">Import URL</h3>
+                  <button
+                    onClick={() => {
+                      setShowImportModal(false);
+                      setImportUrl("");
+                      setImportError("");
+                    }}
+                    className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors"
+                  >
+                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+              <div className="p-6">
+                <p className="text-slate-600 dark:text-slate-400 mb-4">
+                  Paste a previously generated API URL or complete URL to automatically fill the form fields.
+                </p>
+                <div className="space-y-4">
+                  <div>
+                    <label htmlFor="importUrl" className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
+                      URL to Import
+                    </label>
+                    <textarea
+                      id="importUrl"
+                      value={importUrl}
+                      onChange={(e) => setImportUrl(e.target.value)}
+                      placeholder="http://localhost:3000/api/git-diff?repo=https://github.com/owner/repo&from=v1.0.0&to=v2.0.0..."
+                      className="w-full px-4 py-3 border border-slate-300 dark:border-slate-600 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-transparent bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 transition-all duration-200 min-h-[100px] resize-y"
+                      required
+                    />
+                  </div>
+                  {importError && (
+                    <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 px-4 py-3 rounded-lg text-sm">
+                      {importError}
+                    </div>
+                  )}
+                  <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-4">
+                    <h4 className="text-amber-800 dark:text-amber-300 font-semibold text-sm mb-2">Supported formats:</h4>
+                    <ul className="text-amber-700 dark:text-amber-300 text-xs space-y-1">
+                      <li>
+                        • Complete URL:{" "}
+                        <code className="bg-amber-100 dark:bg-amber-800 px-1 rounded">http://localhost:3000/api/git-diff?repo=...</code>
+                      </li>
+                      <li>
+                        • API path only: <code className="bg-amber-100 dark:bg-amber-800 px-1 rounded">/api/git-diff?repo=...</code>
+                      </li>
+                      <li>• Any URL containing git-diff parameters</li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+              <div className="p-6 border-t border-slate-200 dark:border-slate-700 flex justify-end space-x-3">
+                <button
+                  onClick={() => {
+                    setShowImportModal(false);
+                    setImportUrl("");
+                    setImportError("");
+                  }}
+                  className="px-4 py-2 text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 font-medium transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleImportUrl}
+                  disabled={!importUrl.trim()}
+                  className="px-6 py-2 bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 disabled:from-slate-300 disabled:to-slate-400 text-white font-semibold rounded-lg transition-all duration-200 disabled:cursor-not-allowed"
+                >
+                  Import & Fill Form
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Error Message */}
         {error && (
           <div className="animate-fade-in bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 px-6 py-4 rounded-xl mb-8 backdrop-blur-sm">
