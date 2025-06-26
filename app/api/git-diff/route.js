@@ -92,6 +92,7 @@ export async function GET(request) {
       targetDir: targetDir || null,
       excludeSubPaths: excludeSubPaths || null,
       restOnly: restOnly === "true" || restOnly === "1",
+      maxCommits: searchParams.get("maxCommits") ? parseInt(searchParams.get("maxCommits"), 10) : 10000,
     };
 
     // Handle streaming requests

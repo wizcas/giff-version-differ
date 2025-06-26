@@ -7,10 +7,11 @@ function testGitDifferStreaming() {
   // Configuration
   const config = {
     baseUrl: "http://localhost:3000", // Change to your deployed URL
-    repo: "https://github.com/vercel/next.js",
-    from: "v14.0.0",
-    to: "v14.0.1",
-    // token: 'your-github-token', // Uncomment for private repos
+    repo: "https://github.com/microsoft/vscode",
+    from: "1.80.0",
+    to: "1.81.0",
+    maxCommits: 5000, // Test with higher limit
+    // token: 'your-github-token', // Uncomment for private repos or to avoid rate limits
   };
 
   console.log("Testing Git Differ Streaming API...");
@@ -48,7 +49,11 @@ function fetchCommitsStream(config) {
   }
 
   if (config.excludeSubPaths) {
-    params.push(`excludeSubPaths=${config.targetDir}`);
+    params.push(`excludeSubPaths=${config.excludeSubPaths}`);
+  }
+
+  if (config.maxCommits) {
+    params.push(`maxCommits=${config.maxCommits}`);
   }
 
   const url = `${config.baseUrl}/api/git-diff/stream?${params.filter(Boolean).join("&")}`;
