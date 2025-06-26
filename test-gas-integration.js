@@ -6,7 +6,7 @@
 function testGitDifferStreaming() {
   // Configuration
   const config = {
-    baseUrl: "http://localhost:3001", // Change to your deployed URL
+    baseUrl: "http://localhost:3000", // Change to your deployed URL
     repo: "https://github.com/vercel/next.js",
     from: "v14.0.0",
     to: "v14.0.1",
@@ -133,30 +133,37 @@ function fetchCommitsStream(config) {
 // For local testing (not needed in Google Apps Script)
 function simulateUrlFetchApp() {
   if (typeof UrlFetchApp === "undefined") {
+    // Use Node.js fetch for local testing
+    const { default: fetch } = require("node-fetch");
     global.UrlFetchApp = {
-      fetch: function (url, options) {
-        const fetch = require("node-fetch");
+      fetch: async function (url, options) {
+        const response = await fetch(url, options);
         return {
-          getResponseCode: () => 200,
-          getContentText: () => {
-            // Simulate streaming response
-            return (
-              JSON.stringify({ type: "start", timestamp: new Date().toISOString() }) +
-              "\\n" +
-              JSON.stringify({ type: "progress", status: "Fetching commits..." }) +
-              "\\n" +
-              JSON.stringify({ type: "commits", commits: [{ hash: "abc123", author: "Test" }], progress: { processed: 1, total: 1 } }) +
-              "\\n" +
-              JSON.stringify({ type: "complete", success: true, totalCommits: 1, elapsedTime: "500ms" }) +
-              "\\n"
-            );
-          },
+          getResponseCode: () => response.status,
+          getContentText: () => response.text(),
         };
       },
     };
   }
 }
 
+// Test runner for both local and Google Apps Script environments
+async function runTest() {
+  // Enable simulation for local testing
+  if (typeof process !== "undefined" && process.versions && process.versions.node) {
+    console.log("Running in Node.js environment - enabling fetch simulation");
+    simulateUrlFetchApp();
+  }
+  
+  try {
+    const result = await testGitDifferStreaming();
+    console.log("✅ Test completed successfully!");
+    return result;
+  } catch (error) {
+    console.error("❌ Test failed:", error.message);
+    throw error;
+  }
+}
+
 // Uncomment for local testing
-// simulateUrlFetchApp();
-// testGitDifferStreaming();
+// runTest();
