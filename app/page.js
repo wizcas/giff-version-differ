@@ -16,6 +16,9 @@ export default function Home() {
   const [showImportModal, setShowImportModal] = useState(false);
   const [importUrl, setImportUrl] = useState("");
   const [importError, setImportError] = useState("");
+  const [streamProgress, setStreamProgress] = useState("");
+  const [streamCommits, setStreamCommits] = useState([]);
+  const [streamSummary, setStreamSummary] = useState(null);
 
   // Generate dynamic API URL for documentation
   const generateApiUrl = () => {
@@ -97,13 +100,18 @@ export default function Home() {
     setLoading(true);
     setError("");
     setResult(null);
+    setStreamProgress("Starting...");
+    setStreamCommits([]);
+    setStreamSummary(null);
 
     try {
       const params = new URLSearchParams({
         repo,
         from: fromRef,
         to: toRef,
-      }); // Add optional parameters only if they have values
+      });
+
+      // Add optional parameters only if they have values
       if (targetDir.trim()) {
         params.append("targetDir", targetDir);
       }
@@ -114,16 +122,101 @@ export default function Home() {
         params.append("token", token);
       }
 
-      const response = await fetch(`/api/git-diff?${params}`);
-      const data = await response.json();
+      // Use streaming API
+      const response = await fetch(`/api/git-diff/stream?${params}`);
 
-      if (data.success) {
-        setResult(data);
-      } else {
-        setError(data.error || "An error occurred");
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let allCommits = [];
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+
+        // Keep the last potentially incomplete line in the buffer
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          const trimmedLine = line.trim();
+          if (!trimmedLine) continue;
+
+          try {
+            const data = JSON.parse(trimmedLine);
+
+            switch (data.type) {
+              case "start":
+                setStreamProgress(`Started analyzing ${data.repoUrl}...`);
+                break;
+
+              case "progress":
+                setStreamProgress(data.status);
+                break;
+
+              case "commits":
+                allCommits = allCommits.concat(data.commits);
+                setStreamCommits([...allCommits]);
+                setStreamProgress(`Processing commits: ${data.progress.processed}/${data.progress.total}`);
+                break;
+
+              case "complete":
+                setStreamProgress("Analysis complete!");
+                setStreamSummary({
+                  totalCommits: data.totalCommits,
+                  elapsedTime: data.elapsedTime,
+                  fetchStats: data.fetchStats, // Add fetch statistics
+                  apiUsed: data.apiUsed,
+                  success: true,
+                });
+                // Convert to old result format for compatibility
+                setResult({
+                  success: true,
+                  commits: allCommits,
+                  totalCommits: data.totalCommits,
+                  elapsedTime: data.elapsedTime,
+                  fetchStats: data.fetchStats,
+                  apiUsed: data.apiUsed,
+                  repository: data.repository,
+                  fromRef: data.fromRef,
+                  toRef: data.toRef,
+                  fromSha: data.fromSha,
+                  toSha: data.toSha,
+                });
+                break;
+
+              case "error":
+                throw new Error(`API Error: ${data.error}`);
+
+              default:
+                console.log(`Unknown event type: ${data.type}`);
+            }
+          } catch (parseError) {
+            console.warn(`Failed to parse streaming response line:`, parseError);
+          }
+        }
+      }
+
+      // Process any remaining buffer
+      if (buffer.trim()) {
+        try {
+          const data = JSON.parse(buffer);
+          if (data.type === "error") {
+            throw new Error(`API Error: ${data.error}`);
+          }
+        } catch (parseError) {
+          console.warn(`Failed to parse final buffer:`, parseError);
+        }
       }
     } catch (err) {
       setError("Failed to fetch commits: " + err.message);
+      setStreamProgress("Error occurred");
     } finally {
       setLoading(false);
     }
@@ -376,7 +469,7 @@ export default function Home() {
                   <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
                 </div>
               )}
-              <span className={loading ? "opacity-0" : "opacity-100"}>{loading ? "Analyzing Commits..." : "🔍 Analyze Commits"}</span>
+              <span className={loading ? "opacity-0" : "opacity-100"}>{loading ? "Analyzing Commits..." : "🚉 Stream Analysis"}</span>
             </button>{" "}
           </form>
         </div>
@@ -482,6 +575,105 @@ export default function Home() {
           </div>
         )}
 
+        {/* Real-time Progress Section */}
+        {(loading || streamProgress) && (
+          <div className="animate-fade-in bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm rounded-2xl shadow-xl border border-white/20 overflow-hidden max-w-6xl mx-auto mb-8">
+            {/* Progress Header */}
+            <div className="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 px-8 py-6 border-b border-slate-200 dark:border-slate-700">
+              <h2 className="text-2xl font-bold text-slate-800 dark:text-slate-200 flex items-center">
+                {loading ? (
+                  <div className="w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin mr-3"></div>
+                ) : (
+                  <svg className="w-6 h-6 text-green-600 dark:text-green-400 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                )}
+                {loading ? "Analyzing Repository..." : "Analysis Complete"}
+              </h2>
+            </div>
+
+            <div className="p-8">
+              {/* Progress Status */}
+              <div className="mb-6">
+                <div className="text-sm font-medium text-slate-600 dark:text-slate-400 mb-2">Status</div>
+                <div className="text-lg text-slate-900 dark:text-slate-100 font-medium">{streamProgress || "Initializing..."}</div>
+              </div>
+
+              {/* Streaming Commits Preview */}
+              {streamCommits.length > 0 && (
+                <div className="mb-6">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg font-bold text-slate-800 dark:text-slate-200 flex items-center">
+                      <svg
+                        className="w-5 h-5 text-slate-600 dark:text-slate-400 mr-2"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                      </svg>
+                      Live Commits ({streamCommits.length})
+                    </h3>
+                    {streamSummary && (
+                      <div className="text-sm text-slate-600 dark:text-slate-400">Completed in {streamSummary.elapsedTime}</div>
+                    )}
+                  </div>
+
+                  <div className="space-y-3 max-h-60 overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-slate-300 dark:scrollbar-thumb-slate-600 scrollbar-track-transparent">
+                    {streamCommits
+                      .slice(-5)
+                      .reverse()
+                      .map((commit, index) => (
+                        <div
+                          key={commit.fullHash || commit.hash || index}
+                          className="bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-lg p-4 hover:shadow-md transition-all duration-200"
+                        >
+                          <div className="flex items-start justify-between mb-2">
+                            <div className="flex items-center space-x-3">
+                              <code className="bg-amber-100 dark:bg-amber-900/50 text-amber-800 dark:text-amber-300 px-2 py-1 rounded text-xs font-mono">
+                                {commit.hash || commit.fullHash?.substring(0, 7) || "unknown"}
+                              </code>
+                              <span className="text-slate-600 dark:text-slate-400 text-sm">{commit.author || "Unknown Author"}</span>
+                            </div>
+                            <div className="text-xs text-slate-500 dark:text-slate-500">
+                              {commit.date ? new Date(commit.date).toLocaleDateString() : ""}
+                            </div>
+                          </div>
+                          <div className="text-slate-800 dark:text-slate-200 text-sm leading-relaxed">
+                            {commit.cleanMessage || commit.message || "No message"}
+                          </div>
+                          {commit.semverType && (
+                            <div className="mt-2">
+                              <span
+                                className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                                  commit.semverType === "major"
+                                    ? "bg-red-100 text-red-800 dark:bg-red-900/50 dark:text-red-300"
+                                    : commit.semverType === "minor"
+                                    ? "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/50 dark:text-yellow-300"
+                                    : commit.semverType === "patch" || commit.semverType === "fix"
+                                    ? "bg-green-100 text-green-800 dark:bg-green-900/50 dark:text-green-300"
+                                    : "bg-slate-100 text-slate-800 dark:bg-slate-700 dark:text-slate-300"
+                                }`}
+                              >
+                                {commit.semverType}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                  </div>
+
+                  {streamCommits.length > 5 && (
+                    <div className="mt-3 text-center text-sm text-slate-500 dark:text-slate-400">
+                      Showing latest 5 of {streamCommits.length} commits
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Results Section */}
         {result && (
           <div className="animate-fade-in bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm rounded-2xl shadow-xl border border-white/20 overflow-hidden max-w-6xl mx-auto">
@@ -536,6 +728,50 @@ export default function Home() {
                   <div className="text-lg font-semibold text-slate-900 dark:text-slate-100">{result.elapsedTime}</div>
                 </div>
               </div>
+
+              {/* Fetch Statistics - Show only for GraphQL API with fetch stats */}
+              {result.fetchStats && result.fetchStats.totalChecked > 0 && (
+                <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-xl border border-blue-200 dark:border-blue-800 mb-6">
+                  <div className="flex items-center mb-3">
+                    <svg className="w-5 h-5 text-blue-600 dark:text-blue-400 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
+                      />
+                    </svg>
+                    <h4 className="text-sm font-semibold text-blue-800 dark:text-blue-300">API Efficiency</h4>
+                  </div>
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
+                    <div>
+                      <div className="text-blue-600 dark:text-blue-400 font-medium">Commits Checked</div>
+                      <div className="text-slate-900 dark:text-slate-100 font-semibold">{result.fetchStats.totalChecked || "N/A"}</div>
+                    </div>
+                    <div>
+                      <div className="text-blue-600 dark:text-blue-400 font-medium">API Requests</div>
+                      <div className="text-slate-900 dark:text-slate-100 font-semibold">{result.fetchStats.requestCount || "N/A"}</div>
+                    </div>
+                    <div>
+                      <div className="text-blue-600 dark:text-blue-400 font-medium">Fetch Time</div>
+                      <div className="text-slate-900 dark:text-slate-100 font-semibold">{result.fetchStats.fetchTime || "N/A"}</div>
+                    </div>
+                  </div>
+                  {result.fetchStats.totalChecked && result.totalCommits && (
+                    <div className="mt-3 pt-3 border-t border-blue-200 dark:border-blue-700">
+                      <div className="text-xs text-blue-700 dark:text-blue-300">
+                        Efficiency: {result.totalCommits} returned / {result.fetchStats.totalChecked} checked ={" "}
+                        {Math.round((result.totalCommits / result.fetchStats.totalChecked) * 100)}% efficiency
+                        {result.fetchStats.totalChecked > result.totalCommits * 2 && (
+                          <span className="text-amber-600 dark:text-amber-400 ml-2">
+                            ⚠️ Consider using smaller date ranges for better performance
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Commits List */}
               {result.commits && result.commits.length > 0 && (
@@ -756,6 +992,112 @@ export default function Home() {
                         <code className="bg-amber-100 dark:bg-amber-800 px-1 rounded">src/a/c/d/test.js</code>
                       </p>
                     </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Streaming API Documentation */}
+        <div className="mt-8 text-center max-w-6xl mx-auto">
+          <div className="bg-blue-50/60 dark:bg-blue-900/20 backdrop-blur-sm rounded-2xl p-8 border border-blue-200/20">
+            <h3 className="text-xl font-bold text-slate-800 dark:text-slate-200 mb-4 flex items-center justify-center">
+              <svg className="w-6 h-6 text-blue-600 dark:text-blue-400 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16l-4-4m0 0l4-4m-4 4h18" />
+              </svg>
+              Streaming API (No Timeout Limits)
+            </h3>
+            <p className="text-slate-600 dark:text-slate-400 mb-6">
+              For large repositories or complete commit analysis without timeout limits, use our streaming API. Perfect for Google Apps
+              Script and other integrations.
+            </p>
+
+            <div className="bg-slate-900 dark:bg-slate-950 p-6 rounded-xl font-mono text-sm overflow-x-auto border">
+              <div className="text-left space-y-4">
+                <div className="space-y-2">
+                  <div className="text-slate-400 text-xs">Streaming API URL:</div>
+                  <div className="bg-slate-800 dark:bg-slate-900 p-3 rounded border select-all">
+                    <span className="text-amber-400">GET</span>{" "}
+                    <span className="text-green-400 break-all">
+                      {typeof window !== "undefined"
+                        ? `${window.location.origin}/api/git-diff/stream${generateApiUrl().replace("/api/git-diff", "")}`
+                        : `http://localhost:3000/api/git-diff/stream${generateApiUrl().replace("/api/git-diff", "")}`}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <div className="text-slate-400 text-xs">Regular API with streaming:</div>
+                  <div className="bg-slate-800 dark:bg-slate-900 p-3 rounded border select-all">
+                    <span className="text-amber-400">GET</span>{" "}
+                    <span className="text-green-400 break-all">
+                      {typeof window !== "undefined"
+                        ? `${window.location.origin}${generateApiUrl()}&stream=true`
+                        : `http://localhost:3000${generateApiUrl()}&stream=true`}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-4 text-sm text-slate-500 dark:text-slate-400 text-left">
+              <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg border border-blue-200 dark:border-blue-800">
+                <h4 className="font-semibold text-blue-700 dark:text-blue-300 mb-3">📡 Streaming Response Format</h4>
+                <div className="space-y-3">
+                  <div>
+                    <p className="font-medium text-blue-800 dark:text-blue-200 mb-1">Stream Endpoint (/stream):</p>
+                    <p className="text-xs text-blue-600 dark:text-blue-400">Returns JSON Lines format (one JSON object per line)</p>
+                  </div>
+
+                  <div>
+                    <p className="font-medium text-blue-800 dark:text-blue-200 mb-1">Regular Endpoint (?stream=true):</p>
+                    <p className="text-xs text-blue-600 dark:text-blue-400">Returns Server-Sent Events format</p>
+                  </div>
+
+                  <div className="bg-slate-900 p-3 rounded text-xs font-mono">
+                    <div className="text-green-400">// Start event</div>
+                    <div className="text-white">{`{"type": "start", "repoUrl": "...", "timestamp": "..."}`}</div>
+                    <div className="text-green-400 mt-2">// Progress updates</div>
+                    <div className="text-white">{`{"type": "progress", "status": "Processing commits...", "timestamp": "..."}`}</div>
+                    <div className="text-green-400 mt-2">// Commit batches</div>
+                    <div className="text-white">{`{"type": "commits", "commits": [...], "progress": {"processed": 10, "total": 100}}`}</div>
+                    <div className="text-green-400 mt-2">// Completion</div>
+                    <div className="text-white">{`{"type": "complete", "success": true, "totalCommits": 100, "summary": {...}}`}</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-4 text-sm text-slate-500 dark:text-slate-400 text-left">
+              <div className="bg-green-50 dark:bg-green-900/20 p-4 rounded-lg border border-green-200 dark:border-green-800">
+                <h4 className="font-semibold text-green-700 dark:text-green-300 mb-3">📱 Google Apps Script Example</h4>
+                <div className="bg-slate-900 p-3 rounded text-xs font-mono overflow-x-auto">
+                  <div className="text-white">
+                    {`function getGitCommits() {
+  const url = 'https://your-domain.vercel.app/api/git-diff/stream';
+  const params = '?repo=https://github.com/owner/repo&from=v1.0.0&to=v2.0.0';
+
+  const response = UrlFetchApp.fetch(url + params);
+  const lines = response.getContentText().split('\\n');
+
+  let allCommits = [];
+
+  lines.forEach(line => {
+    if (line.trim()) {
+      const data = JSON.parse(line);
+
+      if (data.type === 'commits') {
+        allCommits = allCommits.concat(data.commits);
+        Logger.log(\`Progress: \${data.progress.processed}/\${data.progress.total}\`);
+      } else if (data.type === 'complete') {
+        Logger.log(\`Complete: \${data.totalCommits} commits processed\`);
+      }
+    }
+  });
+
+  return allCommits;
+}`}
                   </div>
                 </div>
               </div>

@@ -7,7 +7,7 @@ A **Next.js API** application to get commit information between two Git tags or 
 ## Features
 
 - � **Next.js App Router API** at `/api/git-diff`
-- 🖥️ **Web Interface** for easy testing and usage  
+- 🖥️ **Web Interface** for easy testing and usage
 - 🛠️ **CLI Tool** for command-line usage
 - 📊 **GraphQL + REST API** support with automatic fallback
 - 🎯 **Directory Filtering** (target/exclude specific directories)
@@ -45,7 +45,7 @@ A **Next.js API** application to get commit information between two Git tags or 
    pnpm dev
    ```
 
-2. Open http://localhost:3000 in your browser
+2. Open <http://localhost:3000> in your browser
 3. Fill in the form with repository URL, from reference, and to reference
 4. Click "Get Commits" to see the results
 
@@ -58,20 +58,82 @@ GET /api/git-diff?repo=<github-repo-url>&from=<from-ref>&to=<to-ref>[&options]
 ```
 
 **Required Parameters:**
+
 - `repo` - GitHub repository URL
-- `from` - Starting tag or commit hash  
+- `from` - Starting tag or commit hash
 - `to` - Ending tag or commit hash
 
 **Optional Parameters:**
+
 - `token` - GitHub personal access token
 - `targetDir` - Limit commits to those that changed files in this directory
 - `excludeDir` - Exclude commits that only changed files in this directory
 - `restOnly` - Force use of REST API only (set to `true` or `1`)
 
 **Example:**
+
 ```bash
 curl "http://localhost:3000/api/git-diff?repo=https://github.com/vercel/next.js&from=v14.0.0&to=v14.1.0"
 ```
+
+### Streaming API (No Timeout Limits)
+
+For large repositories or when you need to process all commits without timeout constraints, use the streaming API endpoints:
+
+#### Dedicated Streaming Endpoint
+
+```
+GET /api/git-diff/stream?repo=<github-repo-url>&from=<from-ref>&to=<to-ref>[&options]
+```
+
+Returns **JSON Lines** format (one JSON object per line), perfect for Google Apps Script and server-side processing.
+
+#### Regular API with Streaming
+
+```
+GET /api/git-diff?repo=<github-repo-url>&from=<from-ref>&to=<to-ref>&stream=true[&options]
+```
+
+Returns **Server-Sent Events** format, ideal for real-time web interfaces.
+
+**Key Benefits:**
+
+- ✅ **No timeout issues** - Processes repositories with thousands of commits
+- ✅ **Real-time progress** - Get updates as commits are processed
+- ✅ **Memory efficient** - Data sent in small batches
+- ✅ **Google Apps Script compatible** - Perfect for automation
+
+**Streaming Response Types:**
+
+- `start` - Processing begins with metadata
+- `progress` - Status updates during processing
+- `commits` - Batches of processed commits with progress info
+- `complete` - Final summary with total counts and timing
+- `error` - Error information if something fails
+
+**Example for Google Apps Script:**
+
+```javascript
+function getCommits() {
+  const url = 'https://your-app.vercel.app/api/git-diff/stream?repo=https://github.com/owner/repo&from=v1.0.0&to=v2.0.0';
+  const response = UrlFetchApp.fetch(url);
+  const lines = response.getContentText().split('\\n');
+
+  let allCommits = [];
+  lines.forEach(line => {
+    if (line.trim()) {
+      const data = JSON.parse(line);
+      if (data.type === 'commits') {
+        allCommits = allCommits.concat(data.commits);
+      }
+    }
+  });
+
+  return allCommits;
+}
+```
+
+See [GOOGLE_APPS_SCRIPT.md](./GOOGLE_APPS_SCRIPT.md) for complete integration examples.
 
 ### CLI Mode
 
@@ -148,10 +210,12 @@ The tool automatically parses commit messages in the following format:
 ### Jira Ticket Format
 
 Jira tickets should be in the format `[PROJECT-123]` where:
+
 - `PROJECT` is uppercase letters (A-Z)
 - `123` is a number
 
 Examples:
+
 - `feat: [PROJ-123] Add user authentication`
 - `fix: [BUG-456] Fix memory leak in cache`
 - `docs: Update README with new examples`
@@ -233,6 +297,7 @@ The tool is optimized for performance:
 - **Smart Caching**: Minimizes API calls by leveraging data already retrieved
 
 **Performance Comparison:**
+
 - GraphQL API: ~70% faster for large commit ranges
 - REST API: More reliable for unauthenticated requests
 - Combined approach: Best of both worlds
@@ -291,7 +356,7 @@ GET /git-diff?repo=<repo-url>&from=<from-ref>&to=<to-ref>&[options]
 #### Query Parameters
 
 - `repo` - **Required** - GitHub repository URL
-- `from` - **Required** - Starting tag or commit hash  
+- `from` - **Required** - Starting tag or commit hash
 - `to` - **Required** - Ending tag or commit hash
 - `token` - Optional - GitHub personal access token
 - `targetDir` - Optional - Limit commits to those that changed files in this directory
