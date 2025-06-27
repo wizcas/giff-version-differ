@@ -33,6 +33,9 @@ function cloneTemplateSheet(newSheetName) {
     // Rename the cloned sheet
     newSheet.setName(newSheetName);
 
+    // Ensure the cloned sheet is visible (not hidden)
+    newSheet.showSheet();
+
     // Clear all data rows except the header row
     clearDataRows(newSheet);
 
@@ -161,7 +164,7 @@ function onOpen() {
     .addItem("Clone Template Sheet", "promptAndCloneTemplate")
     .addSeparator()
     .addItem("Create 3 Sprint Sheets", "createSprintSheets")
-    .addItem("Create Weekly Sheet", "createWeeklySheet")
+    .addItem("Create Deploy Sheet (Next Tuesday)", "createWeeklySheet")
     .addToUi();
 }
 
@@ -173,15 +176,35 @@ function createSprintSheets() {
 }
 
 /**
- * Helper function to create a weekly sheet with current date.
+ * Helper function to create a weekly sheet with next Tuesday's date.
  */
 function createWeeklySheet() {
   const today = new Date();
-  const weekStr = `Week_${today.getFullYear()}_${String(today.getMonth() + 1).padStart(2, "0")}_${String(today.getDate()).padStart(
-    2,
-    "0"
-  )}`;
-  cloneTemplateSheet(weekStr);
+  const nextTuesday = getNextTuesday(today);
+  const dateStr = nextTuesday.toLocaleDateString("en-US", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+  const sheetName = `Deploy on ${dateStr}`;
+  cloneTemplateSheet(sheetName);
+}
+
+/**
+ * Helper function to calculate the next Tuesday from a given date.
+ * @param {Date} fromDate - The date to calculate from
+ * @returns {Date} The next Tuesday date
+ */
+function getNextTuesday(fromDate) {
+  const date = new Date(fromDate);
+  const dayOfWeek = date.getDay(); // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
+  const daysUntilTuesday = (2 - dayOfWeek + 7) % 7; // 2 = Tuesday
+
+  // If today is Tuesday, get next Tuesday (add 7 days)
+  const daysToAdd = daysUntilTuesday === 0 ? 7 : daysUntilTuesday;
+
+  date.setDate(date.getDate() + daysToAdd);
+  return date;
 }
 
 /**

@@ -4,6 +4,7 @@
  */
 
 const DIFF_FORMULA = '=HYPERLINK(Settings!B1&"?row="&ROW()&"&sheet="&ENCODEURL(GetSheetName()), "🔍 Diff")';
+const ADDITONAL_INFORMATION_RANGE = "A3:C9";
 
 /**
  * Displays the HTML dialog. This function can be called from a custom menu item.
@@ -146,6 +147,41 @@ function getPipelineUrlForService(service) {
 }
 
 /**
+ * Copies the range Settings!A3:C8 and inserts it after the specified target row with formatting.
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} targetSheet The sheet to insert the copied range into.
+ * @param {number} targetRow The row after which to insert the copied range.
+ */
+function copySettingsRange(targetSheet, targetRow) {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const settingsSheet = ss.getSheetByName("Settings");
+
+    if (!settingsSheet) {
+      Logger.log("Settings sheet not found, skipping range copy");
+      return;
+    }
+
+    // Get the source range Settings!A3:C8 (6 rows x 3 columns)
+    const sourceRange = settingsSheet.getRange(ADDITONAL_INFORMATION_RANGE);
+    const numRows = sourceRange.getNumRows();
+    const numCols = sourceRange.getNumColumns();
+
+    // Insert rows after the target row to make space for the copied range
+    targetSheet.insertRowsAfter(targetRow, numRows);
+
+    // Get the destination range (starting from the row after targetRow)
+    const destinationRange = targetSheet.getRange(targetRow + 1, 1, numRows, numCols);
+
+    // Copy values and formatting
+    sourceRange.copyTo(destinationRange, SpreadsheetApp.CopyPasteType.PASTE_NORMAL, false);
+
+    Logger.log(`Copied Settings!${ADDITONAL_INFORMATION_RANGE} to ${targetSheet.getName()} starting at row ${targetRow + 1}`);
+  } catch (error) {
+    Logger.log(`Error copying Settings range: ${error.message}`);
+  }
+}
+
+/**
  * Processes the selected product and service from the dialog.
  * First, checks if the product/service combination already exists in column A.
  * If it exists, highlights the row and returns a status.
@@ -226,6 +262,10 @@ function processSelection(product, service) {
     const newRowIndex = activeSheet.getLastRow() + 1; // This will be 2 if only header, or 1 if empty
     activeSheet.getRange(newRowIndex, 1).setRichTextValue(richTextValue);
     activeSheet.getRange(newRowIndex, 4).setFormula(DIFF_FORMULA);
+
+    // Copy Settings!A3:C8 and insert it after the target row
+    copySettingsRange(activeSheet, newRowIndex);
+
     // Ensure the row extends to at least column D for future checks.
     // If the sheet's last column is less than 4 (D), expand it.
     if (activeSheet.getLastColumn() < 5) {
@@ -253,6 +293,10 @@ function processSelection(product, service) {
       Logger.log("Found empty row at: %s", targetRowNumber);
       activeSheet.getRange(targetRowNumber, 1).setRichTextValue(richTextValue);
       activeSheet.getRange(targetRowNumber, 4).setFormula(DIFF_FORMULA);
+
+      // Copy Settings!A3:C8 and insert it after the target row
+      copySettingsRange(activeSheet, targetRowNumber);
+
       foundEmptyRow = true;
       break; // Found one, so stop
     }
@@ -263,6 +307,10 @@ function processSelection(product, service) {
     targetRowNumber = activeSheet.getLastRow() + 1; // Append to the very end
     activeSheet.getRange(targetRowNumber, 1).setRichTextValue(richTextValue);
     activeSheet.getRange(targetRowNumber, 4).setFormula(DIFF_FORMULA);
+
+    // Copy Settings!A3:C8 and insert it after the target row
+    copySettingsRange(activeSheet, targetRowNumber);
+
     // Ensure the row extends to at least column D for future checks
     if (activeSheet.getLastColumn() < 5) {
       activeSheet.getRange(targetRowNumber, 2, 1, 4).setValues([["", "", ""]]);

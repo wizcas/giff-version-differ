@@ -21,6 +21,7 @@ const JIRA_BASE_URL = "<JIRA_BASE_URL>";
 // Streaming API configuration
 const USE_STREAMING_API = true; // Set to false to use regular API
 const MAX_COMMITS_LIMIT = 1000; // Limit commits to prevent excessive API calls
+const TEMPLATE_COMMIT_ROWS = 7; // Number of predefined rows in template for commits
 
 /**
  * Main function to handle GET requests from the Web App URL.
@@ -592,42 +593,23 @@ function getFormattedFirstLineMessage(fullMessage) {
 }
 
 /**
- * Inserts commit data into the sheet, clearing existing rows below the target.
+ * Inserts commit data into the sheet, filling template rows first, then inserting additional rows if needed.
  * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet The sheet to modify.
  * @param {number} targetRow The row where the initial service data is.
  * @param {Array<Object>} commits An array of commit objects.
  * @param {string} repo The full repository URL for constructing PR links.
  */
 function insertCommitsIntoSheet(sheet, targetRow, commits, repo) {
-  // Find the row number of the next service entry
-  const lastRow = sheet.getLastRow();
-  let nextServiceRow = lastRow + 1; // Default to end of sheet if no more services below
-
-  if (lastRow - targetRow > 0) {
-    // Search for the next row in column A that has data (i.e., next service entry)
-    // We start searching from targetRow + 1 (the row immediately after the current service)
-    const rangeToCheck = sheet.getRange(targetRow + 1, 1, lastRow - targetRow, 1);
-    const valuesToCheck = rangeToCheck.getDisplayValues();
-
-    for (let i = 0; i < valuesToCheck.length; i++) {
-      if (valuesToCheck[i][0] && valuesToCheck[i][0].toString().trim() !== "") {
-        nextServiceRow = targetRow + 1 + i;
-        break;
-      }
-    }
-
-    // Determine the number of rows to delete.
-    // If nextServiceRow is the end of the sheet, delete all rows until last row + 1.
-    // If it's another service entry, delete rows from targetRow + 1 up to nextServiceRow - 1.
-    const rowsToDeleteCount = nextServiceRow - (targetRow + 1);
-
-    if (rowsToDeleteCount > 0) {
-      sheet.deleteRows(targetRow + 1, rowsToDeleteCount);
-    }
+  if (commits.length === 0) {
+    // Clear the template rows if no commits (only columns D-H)
+    const templateRange = sheet.getRange(targetRow + 1, 4, TEMPLATE_COMMIT_ROWS, 5);
+    templateRange.clearContent();
+    templateRange.setBackground(null);
+    return;
   }
 
-  // Prepare commit data for insertion
-  const dataToInsert = commits.map((commit) => {
+  // Prepare commit data for insertion (only columns D-H, preserving A-C)
+  const commitData = commits.map((commit) => {
     // Get the full commit message and extract first line only
     const fullMessage = commit.message || "";
     const firstLineMessage = getFormattedFirstLineMessage(fullMessage);
@@ -637,55 +619,73 @@ function insertCommitsIntoSheet(sheet, targetRow, commits, repo) {
     const jiraTicketId = commit.jiraTicketId || "";
     const semverType = commit.semverType || "";
 
-    // Extract pull request ID from the original first line (without prefix)
+    return [firstLineMessage, date, author, jiraTicketId, semverType]; // D,E,F,G,H columns for commits (A,B,C preserved)
+  });
+
+  // Step 1: Fill the first 7 template rows
+  const templateRowsToFill = Math.min(commits.length, TEMPLATE_COMMIT_ROWS);
+  if (templateRowsToFill > 0) {
+    const templateRange = sheet.getRange(targetRow + 1, 4, templateRowsToFill, 5); // Only columns D-H
+    templateRange.setValues(commitData.slice(0, templateRowsToFill));
+    templateRange.setBackground(null); // Clear any background colors
+  }
+
+  // Clear any remaining template rows if we have fewer than 7 commits (only columns D-H)
+  if (commits.length < TEMPLATE_COMMIT_ROWS) {
+    const remainingRows = TEMPLATE_COMMIT_ROWS - commits.length;
+    const clearRange = sheet.getRange(targetRow + 1 + commits.length, 4, remainingRows, 5); // Only columns D-H
+    clearRange.clearContent();
+    clearRange.setBackground(null);
+  }
+
+  // Step 2: Insert additional rows if we have more than 7 commits
+  let additionalStartRow = targetRow + TEMPLATE_COMMIT_ROWS + 1;
+  if (commits.length > TEMPLATE_COMMIT_ROWS) {
+    const additionalCommits = commitData.slice(TEMPLATE_COMMIT_ROWS);
+    const numAdditionalRows = additionalCommits.length;
+
+    // Insert new rows after the template rows
+    sheet.insertRowsAfter(targetRow + TEMPLATE_COMMIT_ROWS, numAdditionalRows);
+
+    // Get the range for the additional inserted rows (only columns D-H)
+    const additionalRange = sheet.getRange(additionalStartRow, 4, numAdditionalRows, 5);
+
+    // Write data to the additional rows
+    additionalRange.setValues(additionalCommits);
+    additionalRange.setBackground(null); // Clear any background colors
+  }
+
+  // Step 3: Add hyperlinks to all commit rows (both template and additional)
+  for (let i = 0; i < commits.length; i++) {
+    const commit = commits[i];
+    let currentRow;
+
+    if (i < TEMPLATE_COMMIT_ROWS) {
+      // Template rows
+      currentRow = targetRow + 1 + i;
+    } else {
+      // Additional inserted rows
+      currentRow = additionalStartRow + (i - TEMPLATE_COMMIT_ROWS);
+    }
+
+    // Add hyperlink for commit message with PR ID (column D)
+    const fullMessage = commit.message || "";
+    const firstLineMessage = getFormattedFirstLineMessage(fullMessage);
     const originalFirstLine = (fullMessage || "").split("\n")[0].trim();
     const pullRequestId = extractPullRequestId(originalFirstLine);
 
-    return ["", "", "", firstLineMessage, date, author, jiraTicketId, semverType]; // D,E,F,G,H columns for commits
-    // A,B,C are empty for these rows
-  });
+    if (pullRequestId) {
+      const messageCell = sheet.getRange(currentRow, 4); // Column D
+      const prUrl = `${repo}/pull/${pullRequestId}`;
+      messageCell.setFormula(`=HYPERLINK("${prUrl}", "${firstLineMessage.replace(/"/g, '""')}")`);
+    }
 
-  if (dataToInsert.length > 0) {
-    const startRow = targetRow + 1;
-    const numRows = dataToInsert.length;
-    const numCols = dataToInsert[0].length; // Should be 8 (for A-H)
-
-    // Insert new rows for commits
-    sheet.insertRowsAfter(targetRow, numRows);
-
-    // Get the range for the inserted rows
-    const insertedRange = sheet.getRange(startRow, 1, numRows, numCols);
-
-    // Write data to the inserted rows
-    insertedRange.setValues(dataToInsert);
-
-    // Clear any background colors from the inserted rows
-    insertedRange.setBackground(null);
-
-    // Now add hyperlinks to the appropriate cells
-    for (let i = 0; i < commits.length; i++) {
-      const commit = commits[i];
-      const currentRow = startRow + i;
-
-      // Add hyperlink for commit message with PR ID (column D)
-      const fullMessage = commit.message || "";
-      const firstLineMessage = getFormattedFirstLineMessage(fullMessage);
-      const originalFirstLine = (fullMessage || "").split("\n")[0].trim();
-      const pullRequestId = extractPullRequestId(originalFirstLine);
-
-      if (pullRequestId) {
-        const messageCell = sheet.getRange(currentRow, 4); // Column D
-        const prUrl = `${repo}/pull/${pullRequestId}`;
-        messageCell.setFormula(`=HYPERLINK("${prUrl}", "${firstLineMessage.replace(/"/g, '""')}")`);
-      }
-
-      // Add hyperlink for Jira ticket ID (column G)
-      const jiraTicketId = commit.jiraTicketId;
-      if (jiraTicketId && jiraTicketId.trim() !== "") {
-        const jiraCell = sheet.getRange(currentRow, 7); // Column G
-        const jiraUrl = `${JIRA_BASE_URL}/${jiraTicketId}`;
-        jiraCell.setFormula(`=HYPERLINK("${jiraUrl}", "${jiraTicketId}")`);
-      }
+    // Add hyperlink for Jira ticket ID (column G)
+    const jiraTicketId = commit.jiraTicketId;
+    if (jiraTicketId && jiraTicketId.trim() !== "") {
+      const jiraCell = sheet.getRange(currentRow, 7); // Column G
+      const jiraUrl = `${JIRA_BASE_URL}/${jiraTicketId}`;
+      jiraCell.setFormula(`=HYPERLINK("${jiraUrl}", "${jiraTicketId}")`);
     }
   }
 
