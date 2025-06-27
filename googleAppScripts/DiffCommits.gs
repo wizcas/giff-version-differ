@@ -258,14 +258,16 @@ function doGet(e) {
     // Delete existing commits and insert the newly fetched ones using updated row
     insertCommitsIntoSheet(mainSheet, updatedTargetRow, commits, repo);
 
+    // Calculate total elapsed time from start of doGet call
+    const endTime = new Date();
+    const totalElapsedTime = `${((endTime - startTime) / 1000).toFixed(1)}s`;
+
     // Update final success status
     let successStatusMessage = `✅ Completed: ${commits.length} commits inserted`;
     if (apiStats.fetchStats && apiStats.fetchStats.requestCount) {
       successStatusMessage += ` (${apiStats.fetchStats.requestCount} API requests)`;
     }
-    if (apiStats.elapsedTime) {
-      successStatusMessage += ` in ${apiStats.elapsedTime}`;
-    }
+    successStatusMessage += ` in ${totalElapsedTime}`;
     updateStatusDisplay(mainSheet, serviceName, successStatusMessage);
 
     // Build success message with API statistics
@@ -276,8 +278,9 @@ function doGet(e) {
       } requests.`;
     }
     if (apiStats.elapsedTime) {
-      successMessage += ` Total time: ${apiStats.elapsedTime}.`;
+      successMessage += ` API time: ${apiStats.elapsedTime}.`;
     }
+    successMessage += ` Total time: ${totalElapsedTime}.`;
 
     responseHtml = successMessage;
     Logger.log(responseHtml);
