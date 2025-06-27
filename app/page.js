@@ -19,7 +19,6 @@ export default function Home() {
   const [streamProgress, setStreamProgress] = useState("");
   const [streamCommits, setStreamCommits] = useState([]);
   const [streamSummary, setStreamSummary] = useState(null);
-  const [restOnly, setRestOnly] = useState(false);
 
   // Generate dynamic API URL for documentation
   const generateApiUrl = () => {
@@ -42,9 +41,6 @@ export default function Home() {
     }
     if (token.trim()) {
       params.append("token", token);
-    }
-    if (restOnly) {
-      params.append("restOnly", "true");
     }
 
     return `${baseUrl}?${params.toString()}`;
@@ -86,7 +82,6 @@ export default function Home() {
         if (params.get("targetDir")) setTargetDir(decodeURIComponent(params.get("targetDir")));
         if (params.get("excludeSubPaths")) setExcludeSubPaths(decodeURIComponent(params.get("excludeSubPaths")));
         if (params.get("token")) setToken(decodeURIComponent(params.get("token")));
-        if (params.get("restOnly")) setRestOnly(params.get("restOnly") === "true");
 
         // Close modal and clear import fields
         setShowImportModal(false);
@@ -125,9 +120,6 @@ export default function Home() {
       }
       if (token.trim()) {
         params.append("token", token);
-      }
-      if (restOnly) {
-        params.append("restOnly", "true");
       }
 
       // Use streaming API
@@ -197,6 +189,7 @@ export default function Home() {
                   fromSha: data.fromSha,
                   toSha: data.toSha,
                 });
+                setLoading(false); // Immediately set loading to false when complete
                 break;
 
               case "error":
@@ -462,51 +455,6 @@ export default function Home() {
                         placeholder="ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
                         className="w-full pl-12 pr-4 py-4 border border-slate-300 dark:border-slate-600 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-transparent bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 transition-all duration-200"
                       />
-                    </div>
-                  </div>
-                </div>
-
-                {/* REST API Only Toggle */}
-                <div className="mt-6">
-                  <div className="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-700/50 rounded-xl border border-slate-200 dark:border-slate-600">
-                    <div className="flex items-center">
-                      <svg className="h-5 w-5 text-slate-400 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.367 2.684 3 3 0 00-5.367-2.684z"
-                        />
-                      </svg>
-                      <div>
-                        <label htmlFor="restOnly" className="text-sm font-semibold text-slate-700 dark:text-slate-300">
-                          Force REST API Only
-                        </label>
-                        <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                          Use GitHub REST API instead of GraphQL for better path filtering
-                        </p>
-                      </div>
-                    </div>
-                    <div className="relative">
-                      <input
-                        id="restOnly"
-                        type="checkbox"
-                        checked={restOnly}
-                        onChange={(e) => setRestOnly(e.target.checked)}
-                        className="sr-only"
-                      />
-                      <label
-                        htmlFor="restOnly"
-                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors cursor-pointer ${
-                          restOnly ? "bg-amber-600 dark:bg-amber-500" : "bg-slate-300 dark:bg-slate-600"
-                        }`}
-                      >
-                        <span
-                          className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                            restOnly ? "translate-x-6" : "translate-x-1"
-                          }`}
-                        />
-                      </label>
                     </div>
                   </div>
                 </div>

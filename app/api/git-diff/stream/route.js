@@ -25,7 +25,6 @@ export async function GET(request) {
     const token = searchParams.get("token");
     const targetDir = searchParams.get("targetDir");
     const excludeSubPaths = searchParams.get("excludeSubPaths");
-    const restOnly = searchParams.get("restOnly");
 
     // Validate required parameters
     if (!repo || !from || !to) {
@@ -52,7 +51,6 @@ export async function GET(request) {
       token: token || process.env.GITHUB_TOKEN,
       targetDir: targetDir || null,
       excludeSubPaths: excludeSubPaths || null,
-      restOnly: restOnly === "true" || restOnly === "1",
       maxCommits: searchParams.get("maxCommits") ? parseInt(searchParams.get("maxCommits"), 10) : 10000,
     };
 

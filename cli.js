@@ -98,7 +98,6 @@ program
   .option("-f, --format <format>", "Output format: human or json", "human")
   .option("--target-dir <directory>", "Limit commits to those that changed files in this directory")
   .option("--exclude-dir <directory>", "Exclude commits that only changed files in this directory")
-  .option("--rest-only", "Force use of REST API only (bypass GraphQL)")
   .action(async (repoUrl, from, to, options) => {
     try {
       // Validate output format
@@ -118,7 +117,6 @@ program
         token: options.token,
         targetDir: options.targetDir,
         excludeDir: options.excludeDir,
-        restOnly: options.restOnly,
       };
 
       if (options.format === "human") {

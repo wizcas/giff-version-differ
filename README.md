@@ -9,7 +9,7 @@ A **Next.js API** application to get commit information between two Git tags or 
 - � **Next.js App Router API** at `/api/git-diff`
 - 🖥️ **Web Interface** for easy testing and usage
 - 🛠️ **CLI Tool** for command-line usage
-- 📊 **GraphQL + REST API** support with automatic fallback
+- 📊 **GitHub REST API** integration
 - 🎯 **Directory Filtering** (target/exclude specific directories)
 - 🏷️ **Semver Detection** in commit messages
 - 🎫 **Jira Ticket ID** extraction
@@ -149,7 +149,6 @@ pnpm start <github-repo-url> <from-tag-or-commit> <to-tag-or-commit> [options]
 - `-f, --format <format>` - Output format: `human` (default) or `json`
 - `--target-dir <directory>` - Limit commits to those that changed files in this directory
 - `--exclude-dir <directory>` - Exclude commits that only changed files in this directory
-- `--rest-only` - Force use of REST API only (bypass GraphQL)
 
 ### Examples
 
@@ -291,16 +290,16 @@ pnpm start https://github.com/owner/repo v1.0.0 v2.0.0 --exclude-dir docs/
 
 The tool is optimized for performance:
 
-- **GraphQL First**: Uses GitHub's GraphQL API by default for faster data fetching
-- **Automatic Fallback**: Falls back to REST API when GraphQL fails (rate limits, authentication issues)
-- **Batch Processing**: Efficiently processes commits in batches when file filtering is needed
+- **GitHub REST API**: Uses GitHub's REST API for reliable data fetching
+- **Path Filtering**: Efficiently filters commits by directory using REST API path parameters
+- **Batch Processing**: Processes commits in batches for optimal performance
 - **Smart Caching**: Minimizes API calls by leveraging data already retrieved
 
-**Performance Comparison:**
+**Performance Features:**
 
-- GraphQL API: ~70% faster for large commit ranges
-- REST API: More reliable for unauthenticated requests
-- Combined approach: Best of both worlds
+- REST API with path filtering for efficient directory-specific queries
+- Automatic handling of pagination for large commit ranges
+- Optimized for both authenticated and unauthenticated requests
 
 ## GitHub Personal Access Token
 
@@ -396,7 +395,7 @@ curl "https://your-vercel-app.vercel.app/git-diff?repo=https://github.com/facebo
   ],
   "totalCommits": 42,
   "elapsedTime": "1.23s",
-  "apiUsed": "graphql",
+  "apiUsed": "rest",
   "repository": {
     "owner": "facebook",
     "repo": "react"

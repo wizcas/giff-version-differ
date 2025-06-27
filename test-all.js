@@ -38,7 +38,7 @@ console.log(chalk.gray("   🖥️  CLI: node cli.js <repo> <from> <to> [options
 
 console.log(chalk.blue("\n📊 Features included:"));
 console.log(chalk.gray("   ✅ Vercel serverless function at /api/git-diff"));
-console.log(chalk.gray("   ✅ GraphQL-first GitHub API with REST fallback"));
+console.log(chalk.gray("   ✅ GitHub REST API integration"));
 console.log(chalk.gray("   ✅ Directory filtering (target-dir, exclude-dir)"));
 console.log(chalk.gray("   ✅ Commit message parsing (semver types, Jira tickets)"));
 console.log(chalk.gray("   ✅ JSON API response format"));
