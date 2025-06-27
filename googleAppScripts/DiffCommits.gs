@@ -185,7 +185,7 @@ function doGet(e) {
         }
       } else {
         // Use regular API directly
-        updateStatusDisplay(mainSheet, serviceName, "Using regular API...");
+        updateStatusDisplay(mainSheet, serviceName, "Using regular API...\nIt may take several minutes. Please wait.");
         const regularApiUrl = buildRegularApiUrl({
           repo,
           from: fromVersion,
@@ -416,16 +416,16 @@ function processStreamingApiResponse(streamApiUrl, sheet, serviceName) {
 
         switch (data.type) {
           case "start":
-            updateStatusDisplay(sheet, serviceName, `Starting: ${data.repoUrl} (${data.from} → ${data.to})`);
+            const startMessage = `Starting: ${data.repoUrl} (${data.from} → ${data.to})\nIt may take several minutes. Please wait.`;
+            updateStatusDisplay(sheet, serviceName, startMessage);
             Logger.log(`Streaming started for ${data.repoUrl} (${data.from} → ${data.to})`);
             break;
 
           case "progress":
             progressCount++;
-            // Update status display with progress (but not too frequently)
-            if (progressCount % 3 === 0) {
-              updateStatusDisplay(sheet, serviceName, `Progress: ${data.status}`);
-            }
+            // Always update status display with the latest progress message
+            const progressMessage = `${data.status}\nIt may take several minutes. Please wait.`;
+            updateStatusDisplay(sheet, serviceName, progressMessage);
             if (progressCount % 5 === 0) {
               // Log every 5th progress update to avoid spam
               Logger.log(`Progress: ${data.status}`);
@@ -436,7 +436,8 @@ function processStreamingApiResponse(streamApiUrl, sheet, serviceName) {
             // Accumulate commits from batches
             if (data.commits && Array.isArray(data.commits)) {
               allCommits = allCommits.concat(data.commits);
-              updateStatusDisplay(sheet, serviceName, `Received: ${allCommits.length} commits so far...`);
+              const commitsMessage = `Received: ${allCommits.length} commits so far...\nIt may take several minutes. Please wait.`;
+              updateStatusDisplay(sheet, serviceName, commitsMessage);
               Logger.log(`Received batch: ${data.commits.length} commits (total: ${allCommits.length})`);
             }
             break;
@@ -605,6 +606,24 @@ function insertCommitsIntoSheet(sheet, targetRow, commits, repo) {
     const templateRange = sheet.getRange(targetRow + 1, 4, TEMPLATE_COMMIT_ROWS, 5);
     templateRange.clearContent();
     templateRange.setBackground(null);
+
+    // Handle columns A, B, C for all template rows when no commits
+    for (let i = 0; i < TEMPLATE_COMMIT_ROWS; i++) {
+      const currentRow = targetRow + 1 + i;
+      const abcRange = sheet.getRange(currentRow, 1, 1, 3); // Columns A, B, C
+      const abcValues = abcRange.getValues()[0];
+
+      // Check if any of the columns A, B, C have values
+      const hasContent = abcValues.some((value) => value !== null && value !== undefined && String(value).trim() !== "");
+
+      if (!hasContent) {
+        // Clear values and styling for columns A, B, C if they're empty
+        abcRange.clearContent();
+        abcRange.setBackground(null);
+        abcRange.setBorder(null, null, null, null, null, null);
+      }
+      // If there's content, preserve existing values and styling (do nothing)
+    }
     return;
   }
 
@@ -628,6 +647,24 @@ function insertCommitsIntoSheet(sheet, targetRow, commits, repo) {
     const templateRange = sheet.getRange(targetRow + 1, 4, templateRowsToFill, 5); // Only columns D-H
     templateRange.setValues(commitData.slice(0, templateRowsToFill));
     templateRange.setBackground(null); // Clear any background colors
+
+    // Handle columns A, B, C for the template rows
+    for (let i = 0; i < templateRowsToFill; i++) {
+      const currentRow = targetRow + 1 + i;
+      const abcRange = sheet.getRange(currentRow, 1, 1, 3); // Columns A, B, C
+      const abcValues = abcRange.getValues()[0];
+
+      // Check if any of the columns A, B, C have values
+      const hasContent = abcValues.some((value) => value !== null && value !== undefined && String(value).trim() !== "");
+
+      if (!hasContent) {
+        // Clear values and styling for columns A, B, C if they're empty
+        abcRange.clearContent();
+        abcRange.setBackground(null);
+        abcRange.setBorder(null, null, null, null, null, null);
+      }
+      // If there's content, preserve existing values and styling (do nothing)
+    }
   }
 
   // Clear any remaining template rows if we have fewer than 7 commits (only columns D-H)
@@ -653,6 +690,10 @@ function insertCommitsIntoSheet(sheet, targetRow, commits, repo) {
     // Write data to the additional rows
     additionalRange.setValues(additionalCommits);
     additionalRange.setBackground(null); // Clear any background colors
+
+    const additionalRowsRange = sheet.getRange(additionalStartRow, 1, numAdditionalRows, 3); // Columns A, B, C
+    additionalRowsRange.clear();
+    additionalRowsRange.clearDataValidations();
   }
 
   // Step 3: Add hyperlinks to all commit rows (both template and additional)
