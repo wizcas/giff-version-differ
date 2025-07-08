@@ -48,45 +48,12 @@ export async function GET(request) {
       );
     }
 
-    if (!from) {
-      console.error(`[API Error] Missing from parameter: ${request.url}`);
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Missing required parameter: from (starting tag or commit hash)",
-        },
-        {
-          status: 400,
-          headers: {
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "GET, OPTIONS",
-            "Access-Control-Allow-Headers": "Content-Type, Authorization",
-          },
-        }
-      );
-    }
-
-    if (!to) {
-      console.error(`[API Error] Missing to parameter: ${request.url}`);
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Missing required parameter: to (ending tag or commit hash)",
-        },
-        {
-          status: 400,
-          headers: {
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "GET, OPTIONS",
-            "Access-Control-Allow-Headers": "Content-Type, Authorization",
-          },
-        }
-      );
-    } // Prepare options
+    // Prepare options - from and to are now optional parameters
+    // The core logic will handle missing parameters with appropriate defaults and warnings
     const options = {
       repoUrl: repo,
-      from,
-      to,
+      from: from || null, // Allow null/undefined for optional from
+      to: to || null, // Allow null/undefined for optional to
       token: token || process.env.GITHUB_TOKEN,
       targetDir: targetDir || null,
       excludeSubPaths: excludeSubPaths || null,

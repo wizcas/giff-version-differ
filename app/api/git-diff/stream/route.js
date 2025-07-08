@@ -26,13 +26,13 @@ export async function GET(request) {
     const targetDir = searchParams.get("targetDir");
     const excludeSubPaths = searchParams.get("excludeSubPaths");
 
-    // Validate required parameters
-    if (!repo || !from || !to) {
+    // Validate required parameters - only repo is required now
+    if (!repo) {
       return new Response(
         JSON.stringify({
           type: "error",
           success: false,
-          error: "Missing required parameters: repo, from, to",
+          error: "Missing required parameter: repo",
         }) + "\n",
         {
           status: 400,
@@ -46,8 +46,8 @@ export async function GET(request) {
 
     const options = {
       repoUrl: repo,
-      from,
-      to,
+      from: from || null, // Allow null/undefined for optional from
+      to: to || null, // Allow null/undefined for optional to
       token: token || process.env.GITHUB_TOKEN,
       targetDir: targetDir || null,
       excludeSubPaths: excludeSubPaths || null,

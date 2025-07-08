@@ -25,14 +25,26 @@ export default function Home() {
     const baseUrl = "/api/git-diff";
     const params = new URLSearchParams();
 
-    // Required parameters - use placeholder if empty
+    // Required parameter
     const repoValue = repo || "https://github.com/owner/repository";
-    const fromValue = fromRef || "v1.0.0";
-    const toValue = toRef || "v2.0.0";
-
     params.append("repo", repoValue);
-    params.append("from", fromValue);
-    params.append("to", toValue); // Optional parameters - only add if they have values
+
+    // Optional version parameters - only add if they have values
+    if (fromRef.trim()) {
+      params.append("from", fromRef);
+    } else {
+      // Show placeholder only in documentation
+      params.append("from", "v1.0.0");
+    }
+
+    if (toRef.trim()) {
+      params.append("to", toRef);
+    } else {
+      // Show placeholder only in documentation
+      params.append("to", "v2.0.0");
+    }
+
+    // Optional parameters - only add if they have values
     if (targetDir.trim()) {
       params.append("targetDir", targetDir);
     }
@@ -107,9 +119,15 @@ export default function Home() {
     try {
       const params = new URLSearchParams({
         repo,
-        from: fromRef,
-        to: toRef,
       });
+
+      // Add version parameters only if they have values
+      if (fromRef.trim()) {
+        params.append("from", fromRef);
+      }
+      if (toRef.trim()) {
+        params.append("to", toRef);
+      }
 
       // Add optional parameters only if they have values
       if (targetDir.trim()) {
@@ -323,9 +341,8 @@ export default function Home() {
                     id="from"
                     value={fromRef}
                     onChange={(e) => setFromRef(e.target.value)}
-                    placeholder="v1.0.0 or commit hash"
+                    placeholder="v1.0.0 or commit hash (optional)"
                     className="w-full pl-12 pr-4 py-4 border border-slate-300 dark:border-slate-600 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-transparent bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 transition-all duration-200"
-                    required
                   />
                 </div>
               </div>
@@ -350,9 +367,8 @@ export default function Home() {
                     id="to"
                     value={toRef}
                     onChange={(e) => setToRef(e.target.value)}
-                    placeholder="v2.0.0 or commit hash"
+                    placeholder="v2.0.0 or commit hash (optional)"
                     className="w-full pl-12 pr-4 py-4 border border-slate-300 dark:border-slate-600 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-transparent bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 transition-all duration-200"
-                    required
                   />
                 </div>
               </div>

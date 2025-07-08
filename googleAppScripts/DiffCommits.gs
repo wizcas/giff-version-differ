@@ -78,8 +78,7 @@ function doGet(e) {
 
     const missingColumns = [];
     if (!serviceName) missingColumns.push("A (Service Name)");
-    if (!fromVersion) missingColumns.push("B (From)");
-    if (!toVersion) missingColumns.push("C (To)");
+    // Remove version validation - we'll handle partial versions differently
 
     if (missingColumns.length > 0) {
       const errorMessage = `Error: Missing data in row ${targetRow} for columns: ${missingColumns.join(", ")}.`;
@@ -91,8 +90,23 @@ function doGet(e) {
       return createHtmlResponse(errorMessage);
     }
 
-    // Check if from and to versions are the same
-    if (fromVersion === toVersion) {
+    // Generate warning messages for status display, but don't modify the versions
+    let warningMessage = "";
+
+    if (!fromVersion && !toVersion) {
+      // No versions specified - let API handle it, but show warning
+      warningMessage = "⚠️ Warning: No version information specified, showing only the latest commit.";
+    } else if (!fromVersion && toVersion) {
+      // Only 'to' specified - let API handle it, but show warning
+      warningMessage = "⚠️ Warning: No 'From Version' specified, showing only the latest commit.";
+    } else if (fromVersion && !toVersion) {
+      // Only 'from' specified - let API handle it, but show warning
+      warningMessage = "⚠️ Warning: No 'To Version' specified. Please manually verify deployment scope.";
+    }
+    // If both versions are specified, no warning needed
+
+    // Check if from and to versions are the same (only if both are provided)
+    if (fromVersion && toVersion && fromVersion === toVersion) {
       const errorMessage = `Error: Start and end versions are the same (${fromVersion}), cannot detect commit history.`;
       updateStatusDisplay(mainSheet, serviceName, `❌ Same versions, cannot detect commits`);
       Logger.log(errorMessage);
@@ -118,8 +132,8 @@ function doGet(e) {
     // 3. Build the streaming API request URL and make the call
     const streamApiUrl = buildStreamApiUrl({
       repo,
-      from: fromVersion,
-      to: toVersion,
+      from: fromVersion, // Use original fromVersion (may be null/undefined)
+      to: toVersion, // Use original toVersion (may be null/undefined)
       targetDir,
       excludeSubPaths,
       token: API_TOKEN,
@@ -166,8 +180,8 @@ function doGet(e) {
           updateStatusDisplay(mainSheet, serviceName, "Calling regular API...\nIt may take several minutes. Please wait.");
           const regularApiUrl = buildRegularApiUrl({
             repo,
-            from: fromVersion,
-            to: toVersion,
+            from: fromVersion, // Use original fromVersion (may be null/undefined)
+            to: toVersion, // Use original toVersion (may be null/undefined)
             targetDir,
             excludeSubPaths,
             token: API_TOKEN,
@@ -196,8 +210,8 @@ function doGet(e) {
         updateStatusDisplay(mainSheet, serviceName, "Using regular API...\nIt may take several minutes. Please wait.");
         const regularApiUrl = buildRegularApiUrl({
           repo,
-          from: fromVersion,
-          to: toVersion,
+          from: fromVersion, // Use original fromVersion (may be null/undefined)
+          to: toVersion, // Use original toVersion (may be null/undefined)
           targetDir,
           excludeSubPaths,
           token: API_TOKEN,
@@ -276,6 +290,12 @@ function doGet(e) {
       successStatusMessage += ` (${apiStats.fetchStats.requestCount} API requests)`;
     }
     successStatusMessage += ` in ${totalElapsedTime}`;
+
+    // Add warning if present
+    if (warningMessage) {
+      successStatusMessage += `\n${warningMessage}`;
+    }
+
     updateStatusDisplay(mainSheet, serviceName, successStatusMessage);
 
     // Build success message with API statistics
@@ -289,6 +309,11 @@ function doGet(e) {
       successMessage += ` API time: ${apiStats.elapsedTime}.`;
     }
     successMessage += ` Total time: ${totalElapsedTime}.`;
+
+    // Add warning to response if present
+    if (warningMessage) {
+      successMessage += ` ${warningMessage}`;
+    }
 
     responseHtml = successMessage;
     Logger.log(responseHtml);
@@ -517,6 +542,7 @@ function buildStreamApiUrl(params) {
   if (params.repo) {
     queryParts.push(`repo=${encodeURIComponent(params.repo)}`);
   }
+  // Only add from/to parameters if they have values
   if (params.from) {
     queryParts.push(`from=${encodeURIComponent(params.from)}`);
   }
@@ -549,6 +575,7 @@ function buildRegularApiUrl(params) {
   if (params.repo) {
     queryParts.push(`repo=${encodeURIComponent(params.repo)}`);
   }
+  // Only add from/to parameters if they have values
   if (params.from) {
     queryParts.push(`from=${encodeURIComponent(params.from)}`);
   }
