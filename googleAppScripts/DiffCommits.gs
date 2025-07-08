@@ -91,6 +91,14 @@ function doGet(e) {
       return createHtmlResponse(errorMessage);
     }
 
+    // Check if from and to versions are the same
+    if (fromVersion === toVersion) {
+      const errorMessage = `Error: Start and end versions are the same (${fromVersion}), cannot detect commit history.`;
+      updateStatusDisplay(mainSheet, serviceName, `❌ Same versions, cannot detect commits`);
+      Logger.log(errorMessage);
+      return createHtmlResponse(errorMessage);
+    }
+
     // Show validation success
     updateStatusDisplay(mainSheet, serviceName, "Validating metadata...");
 
